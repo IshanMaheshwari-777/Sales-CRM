@@ -219,6 +219,7 @@ export function AddLeadModal({ onClose, onSuccess }: AddLeadModalProps) {
     <button
       type="button"
       onClick={() => setActiveTab(tab)}
+      data-testid={`add-lead-tab-${tab}`}
       className={`px-6 py-3 text-sm font-medium transition border-b-2 ${
         activeTab === tab
           ? 'border-orange-500 text-slate-900 bg-orange-50'
@@ -230,12 +231,13 @@ export function AddLeadModal({ onClose, onSuccess }: AddLeadModalProps) {
   );
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+    <div data-testid="add-lead-modal" className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
         <div className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
           <h2 className="text-2xl font-bold text-slate-800">Add New Lead</h2>
           <button
             onClick={onClose}
+            data-testid="add-lead-close"
             className="p-2 hover:bg-slate-100 rounded-lg transition"
           >
             <X className="w-5 h-5 text-slate-600" />
@@ -292,6 +294,7 @@ export function AddLeadModal({ onClose, onSuccess }: AddLeadModalProps) {
                       First Name <span className="text-red-500">*</span>
                     </label>
                     <input
+                      data-testid="add-lead-first-name"
                       type="text"
                       required
                       value={formData.first_name}
@@ -306,6 +309,7 @@ export function AddLeadModal({ onClose, onSuccess }: AddLeadModalProps) {
                       Last Name <span className="text-red-500">*</span>
                     </label>
                     <input
+                      data-testid="add-lead-last-name"
                       type="text"
                       required
                       value={formData.last_name}
@@ -320,6 +324,7 @@ export function AddLeadModal({ onClose, onSuccess }: AddLeadModalProps) {
                       Email ID <span className="text-red-500">*</span>
                     </label>
                     <input
+                      data-testid="add-lead-email"
                       type="email"
                       required
                       value={formData.email}
@@ -334,6 +339,7 @@ export function AddLeadModal({ onClose, onSuccess }: AddLeadModalProps) {
                       Mobile No. <span className="text-red-500">*</span>
                     </label>
                     <input
+                      data-testid="add-lead-mobile"
                       type="tel"
                       required
                       value={formData.mobile_number}
@@ -400,6 +406,7 @@ export function AddLeadModal({ onClose, onSuccess }: AddLeadModalProps) {
                       Stage <span className="text-red-500">*</span>
                     </label>
                     <select
+                      data-testid="add-lead-status"
                       required
                       value={formData.status_id}
                       onChange={(e) => handleStatusChange(e.target.value)}
@@ -419,6 +426,7 @@ export function AddLeadModal({ onClose, onSuccess }: AddLeadModalProps) {
                         Sub-Stage <span className="text-red-500">*</span>
                       </label>
                       <select
+                        data-testid="add-lead-sub-status"
                         required
                         value={formData.sub_status_id}
                         onChange={(e) => setFormData({ ...formData, sub_status_id: e.target.value })}
@@ -445,6 +453,7 @@ export function AddLeadModal({ onClose, onSuccess }: AddLeadModalProps) {
                     Channel <span className="text-red-500">*</span>
                   </label>
                   <select
+                    data-testid="add-lead-channel"
                     required
                     value={formData.channel}
                     onChange={(e) => setFormData({ ...formData, channel: e.target.value })}
@@ -464,6 +473,7 @@ export function AddLeadModal({ onClose, onSuccess }: AddLeadModalProps) {
                     Source <span className="text-red-500">*</span>
                   </label>
                   <select
+                    data-testid="add-lead-source"
                     required
                     value={formData.source_id}
                     onChange={(e) => setFormData({ ...formData, source_id: e.target.value })}
@@ -483,6 +493,7 @@ export function AddLeadModal({ onClose, onSuccess }: AddLeadModalProps) {
                     Campaign Name <span className="text-red-500">*</span>
                   </label>
                   <input
+                    data-testid="add-lead-campaign-name"
                     type="text"
                     required
                     value={formData.campaign_name}
@@ -538,6 +549,7 @@ export function AddLeadModal({ onClose, onSuccess }: AddLeadModalProps) {
             <button
               type="button"
               onClick={onClose}
+              data-testid="add-lead-cancel"
               className="flex-1 px-6 py-3 border border-slate-300 text-slate-700 rounded-lg font-semibold hover:bg-white transition"
             >
               Cancel
@@ -545,6 +557,7 @@ export function AddLeadModal({ onClose, onSuccess }: AddLeadModalProps) {
             <button
               type="submit"
               disabled={loading}
+              data-testid="add-lead-submit"
               className="flex-1 px-6 py-3 bg-orange-500 text-white rounded-lg font-semibold hover:bg-orange-600 transition disabled:opacity-50"
             >
               {loading ? 'Adding...' : 'Add'}

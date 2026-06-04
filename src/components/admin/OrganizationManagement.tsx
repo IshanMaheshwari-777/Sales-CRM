@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Building2, UserPlus, MoreVertical, CreditCard as Edit, Trash2, Users, Crown, Check, X } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { AddEditOrganizationModal } from './AddEditOrganizationModal';
+import { isIgnorableRequestError } from '../../lib/requestErrors';
 
 interface Organization {
   id: string;
@@ -26,10 +27,12 @@ export function OrganizationManagement() {
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
 
   useEffect(() => {
-    loadOrganizations();
+    const controller = new AbortController();
+    loadOrganizations(controller.signal);
+    return () => controller.abort();
   }, []);
 
-  const loadOrganizations = async () => {
+  const loadOrganizations = async (signal?: AbortSignal) => {
     try {
       setLoading(true);
 
@@ -37,6 +40,7 @@ export function OrganizationManagement() {
       const { data: orgs, error } = await supabase
         .from('organizations')
         .select('*')
+        .abortSignal(signal ?? new AbortController().signal)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -44,7 +48,8 @@ export function OrganizationManagement() {
       // Get member counts separately using RPC or direct query
       const { data: memberCounts } = await supabase
         .from('organization_members')
-        .select('organization_id');
+        .select('organization_id')
+        .abortSignal(signal ?? new AbortController().signal);
 
       // Count members per organization
       const countMap = new Map<string, number>();
@@ -61,7 +66,9 @@ export function OrganizationManagement() {
 
       setOrganizations(orgsWithCounts);
     } catch (error) {
-      console.error('Error loading organizations:', error);
+      if (!isIgnorableRequestError(error)) {
+        console.error('Error loading organizations:', error);
+      }
     } finally {
       setLoading(false);
     }

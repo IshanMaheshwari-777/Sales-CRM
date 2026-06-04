@@ -2,110 +2,204 @@ import { createClient } from 'npm:@supabase/supabase-js@2.57.4';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey, X-Webhook-Signature, X-Webhook-Timestamp, X-API-Key',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Client-Info, Apikey, X-API-Key',
 };
 
 interface WebhookConfig {
   id: string;
   organization_id: string;
-  hmac_secret: string;
   is_enabled: boolean;
   allowed_ip_addresses: string[] | null;
   rate_limit_per_minute: number;
 }
 
-interface WebhookSource {
+interface CanonicalWebhookLead {
+  full_name: string;
+  mobile_number: string;
+  email: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  company?: string;
+  course?: string;
+  specialization?: string;
+  campaign_name?: string;
+  campaign_id?: string;
+  adgroup_id?: string;
+  keyword?: string;
+  lead_value?: number;
+  pincode?: string;
+  address_line1?: string;
+  address_line2?: string;
+  university?: string;
+  tags?: string[];
+}
+
+interface CanonicalWebhookPayload {
+  source: string;
+  lead: CanonicalWebhookLead;
+}
+
+interface ExistingLead {
   id: string;
-  field_mappings: Record<string, string>;
 }
 
-async function verifyHmacSignature(
-  secret: string,
-  timestamp: string,
-  payload: string,
-  signature: string
-): Promise<boolean> {
-  const encoder = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    'raw',
-    encoder.encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
+function splitFullName(fullName: string) {
+  const trimmed = fullName.trim().replace(/\s+/g, ' ');
+  if (!trimmed) {
+    return { name: '', first_name: null, last_name: null };
+  }
 
-  const data = encoder.encode(`${timestamp}.${payload}`);
-  const signatureBuffer = await crypto.subtle.sign('HMAC', key, data);
-  const computedSignature = Array.from(new Uint8Array(signatureBuffer))
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('');
+  const parts = trimmed.split(' ');
+  const first_name = parts[0] || null;
+  const last_name = parts.length > 1 ? parts.slice(1).join(' ') : null;
 
-  return computedSignature === signature;
+  return {
+    name: trimmed,
+    first_name,
+    last_name,
+  };
 }
 
-function validateTimestamp(timestamp: string, maxAgeSeconds = 300): boolean {
-  const now = Math.floor(Date.now() / 1000);
-  const requestTime = parseInt(timestamp, 10);
+function validateCanonicalPayload(body: unknown): CanonicalWebhookPayload {
+  const payload = body as Partial<CanonicalWebhookPayload> | null;
 
-  if (isNaN(requestTime)) return false;
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('Invalid JSON payload');
+  }
 
-  const age = now - requestTime;
-  return age >= 0 && age <= maxAgeSeconds;
-}
+  if (!payload.source || typeof payload.source !== 'string' || !payload.source.trim()) {
+    throw new Error('Missing required field: source');
+  }
 
-function applyFieldMapping(
-  sourceData: Record<string, unknown>,
-  mappings: Record<string, string>
-): Record<string, unknown> {
-  const mapped: Record<string, unknown> = {};
+  const lead = payload.lead as Partial<CanonicalWebhookLead> | undefined;
+  if (!lead || typeof lead !== 'object') {
+    throw new Error('Missing required object: lead');
+  }
 
-  for (const [targetField, sourceField] of Object.entries(mappings)) {
-    if (sourceField in sourceData) {
-      mapped[targetField] = sourceData[sourceField];
+  const requiredFields: Array<keyof CanonicalWebhookLead> = ['full_name', 'mobile_number', 'email'];
+  for (const field of requiredFields) {
+    const value = lead[field];
+    if (typeof value !== 'string' || !value.trim()) {
+      throw new Error(`Missing required field: lead.${field}`);
     }
   }
 
-  return mapped;
+  return {
+    source: payload.source.trim(),
+    lead: {
+      ...lead,
+      full_name: lead.full_name!.trim(),
+      mobile_number: lead.mobile_number!.trim(),
+      email: lead.email!.trim().toLowerCase(),
+    },
+  };
 }
 
-async function checkDuplicateLead(
-  supabase: any,
+async function findDuplicateLead(
+  supabase: ReturnType<typeof createClient>,
   organizationId: string,
-  email: string | null,
-  mobileNumber: string | null
-): Promise<string | null> {
-  if (!email && !mobileNumber) return null;
-
-  let query = supabase
+  email: string,
+  mobileNumber: string
+): Promise<ExistingLead | null> {
+  const { data, error } = await supabase
     .from('leads')
     .select('id')
-    .eq('organization_id', organizationId);
+    .eq('organization_id', organizationId)
+    .or(`mobile_number.eq.${mobileNumber},email.eq.${email}`)
+    .order('updated_at', { ascending: false })
+    .limit(1);
 
-  if (email && mobileNumber) {
-    query = query.or(`email.eq.${email},mobile_number.eq.${mobileNumber}`);
-  } else if (email) {
-    query = query.eq('email', email);
-  } else if (mobileNumber) {
-    query = query.eq('mobile_number', mobileNumber);
+  if (error) {
+    throw new Error(`Failed to check duplicates: ${error.message}`);
   }
 
-  const { data } = await query.maybeSingle();
-  return data?.id || null;
+  return data?.[0] ?? null;
+}
+
+function buildLeadWritePayload(payload: CanonicalWebhookPayload) {
+  const { source, lead } = payload;
+  const nameParts = splitFullName(lead.full_name);
+
+  return {
+    name: nameParts.name,
+    first_name: nameParts.first_name,
+    last_name: nameParts.last_name,
+    email: lead.email,
+    mobile_number: lead.mobile_number,
+    company: lead.company ?? null,
+    lead_value: lead.lead_value ?? null,
+    channel: source,
+    campaign_name: lead.campaign_name ?? null,
+    campaign_id: lead.campaign_id ?? null,
+    adgroup_id: lead.adgroup_id ?? null,
+    keyword: lead.keyword ?? null,
+    country: lead.country ?? null,
+    city: lead.city ?? null,
+    state: lead.state ?? null,
+    pincode: lead.pincode ?? null,
+    address_line1: lead.address_line1 ?? null,
+    address_line2: lead.address_line2 ?? null,
+    university: lead.university ?? null,
+    course: lead.course ?? null,
+    specialization: lead.specialization ?? null,
+    tags: Array.isArray(lead.tags) ? lead.tags : null,
+  };
+}
+
+function buildLeadUpdatePayload(payload: CanonicalWebhookPayload) {
+  const { source, lead } = payload;
+  const nameParts = splitFullName(lead.full_name);
+  const updates: Record<string, unknown> = {
+    name: nameParts.name,
+    first_name: nameParts.first_name,
+    last_name: nameParts.last_name,
+    email: lead.email,
+    mobile_number: lead.mobile_number,
+    channel: source,
+  };
+
+  const optionalFields: Array<[keyof CanonicalWebhookLead, string]> = [
+    ['company', 'company'],
+    ['lead_value', 'lead_value'],
+    ['campaign_name', 'campaign_name'],
+    ['campaign_id', 'campaign_id'],
+    ['adgroup_id', 'adgroup_id'],
+    ['keyword', 'keyword'],
+    ['country', 'country'],
+    ['city', 'city'],
+    ['state', 'state'],
+    ['pincode', 'pincode'],
+    ['address_line1', 'address_line1'],
+    ['address_line2', 'address_line2'],
+    ['university', 'university'],
+    ['course', 'course'],
+    ['specialization', 'specialization'],
+    ['tags', 'tags'],
+  ];
+
+  for (const [leadField, dbField] of optionalFields) {
+    if (leadField in lead) {
+      updates[dbField] = lead[leadField] ?? null;
+    }
+  }
+
+  return updates;
 }
 
 async function logWebhookRequest(
-  supabase: any,
+  supabase: ReturnType<typeof createClient>,
   organizationId: string | null,
   request: Request,
-  requestBody: any,
+  requestBody: unknown,
   responseStatus: number,
   errorMessage: string | null,
   durationMs: number
 ) {
   const headers: Record<string, string> = {};
   request.headers.forEach((value, key) => {
-    if (!key.toLowerCase().includes('secret') && !key.toLowerCase().includes('authorization')) {
+    if (!key.toLowerCase().includes('authorization')) {
       headers[key] = value;
     }
   });
@@ -125,9 +219,9 @@ async function logWebhookRequest(
 }
 
 async function updateHealthMetrics(
-  supabase: any,
+  supabase: ReturnType<typeof createClient>,
   organizationId: string,
-  metricType: string,
+  metricType: 'incoming_success' | 'incoming_failed',
   durationMs: number
 ) {
   const hourBucket = new Date();
@@ -145,20 +239,16 @@ async function updateHealthMetrics(
 
 Deno.serve(async (req: Request) => {
   const startTime = Date.now();
-
-  if (req.method === 'OPTIONS') {
-    return new Response(null, {
-      status: 200,
-      headers: corsHeaders,
-    });
-  }
-
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
   const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
   let organizationId: string | null = null;
-  let requestBody: any = null;
+  let requestBody: unknown = null;
+
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { status: 200, headers: corsHeaders });
+  }
 
   try {
     if (req.method !== 'POST') {
@@ -166,20 +256,13 @@ Deno.serve(async (req: Request) => {
     }
 
     const apiKey = req.headers.get('X-API-Key');
-    const signature = req.headers.get('X-Webhook-Signature');
-    const timestamp = req.headers.get('X-Webhook-Timestamp');
-
     if (!apiKey) {
       throw new Error('Missing API key');
     }
 
-    if (!signature || !timestamp) {
-      throw new Error('Missing HMAC signature or timestamp');
-    }
-
     const { data: webhookConfig, error: configError } = await supabase
       .from('webhook_configurations')
-      .select('id, organization_id, hmac_secret, is_enabled, allowed_ip_addresses, rate_limit_per_minute')
+      .select('id, organization_id, is_enabled, allowed_ip_addresses, rate_limit_per_minute')
       .eq('api_key', apiKey)
       .eq('is_enabled', true)
       .maybeSingle<WebhookConfig>();
@@ -190,24 +273,6 @@ Deno.serve(async (req: Request) => {
 
     organizationId = webhookConfig.organization_id;
 
-    if (!validateTimestamp(timestamp)) {
-      throw new Error('Invalid or expired timestamp');
-    }
-
-    const rawBody = await req.text();
-    requestBody = JSON.parse(rawBody);
-
-    const isValidSignature = await verifyHmacSignature(
-      webhookConfig.hmac_secret,
-      timestamp,
-      rawBody,
-      signature
-    );
-
-    if (!isValidSignature) {
-      throw new Error('Invalid HMAC signature');
-    }
-
     if (webhookConfig.allowed_ip_addresses && webhookConfig.allowed_ip_addresses.length > 0) {
       const clientIp = req.headers.get('cf-connecting-ip') || req.headers.get('x-forwarded-for');
       if (!clientIp || !webhookConfig.allowed_ip_addresses.includes(clientIp)) {
@@ -215,32 +280,28 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    const sourceName = requestBody.source || 'default';
-    const { data: webhookSource } = await supabase
-      .from('webhook_sources')
-      .select('id, field_mappings')
-      .eq('organization_id', organizationId)
-      .eq('source_name', sourceName)
-      .eq('is_active', true)
-      .maybeSingle<WebhookSource>();
+    requestBody = await req.json();
+    const payload = validateCanonicalPayload(requestBody);
+    const leadWritePayload = buildLeadWritePayload(payload);
 
-    let leadData: Record<string, unknown> = requestBody.lead || requestBody;
-
-    if (webhookSource?.field_mappings) {
-      leadData = applyFieldMapping(leadData, webhookSource.field_mappings);
-    }
-
-    const email = leadData.email as string | null;
-    const mobileNumber = leadData.mobile_number as string | null;
-
-    const duplicateLeadId = await checkDuplicateLead(
+    const existingLead = await findDuplicateLead(
       supabase,
       organizationId,
-      email,
-      mobileNumber
+      payload.lead.email,
+      payload.lead.mobile_number
     );
 
-    if (duplicateLeadId) {
+    if (existingLead) {
+      const { error: updateError } = await supabase
+        .from('leads')
+        .update(buildLeadUpdatePayload(payload))
+        .eq('id', existingLead.id)
+        .eq('organization_id', organizationId);
+
+      if (updateError) {
+        throw new Error(`Failed to update duplicate lead: ${updateError.message}`);
+      }
+
       const durationMs = Date.now() - startTime;
       await logWebhookRequest(supabase, organizationId, req, requestBody, 200, null, durationMs);
       await updateHealthMetrics(supabase, organizationId, 'incoming_success', durationMs);
@@ -248,9 +309,9 @@ Deno.serve(async (req: Request) => {
       return new Response(
         JSON.stringify({
           success: true,
-          message: 'Duplicate lead detected',
-          lead_id: duplicateLeadId,
-          action: 'skipped',
+          message: 'Existing lead updated successfully',
+          lead_id: existingLead.id,
+          action: 'updated',
         }),
         {
           status: 200,
@@ -266,30 +327,9 @@ Deno.serve(async (req: Request) => {
       .from('leads')
       .insert({
         organization_id: organizationId,
-        name: leadData.name || `${leadData.first_name || ''} ${leadData.last_name || ''}`.trim(),
-        first_name: leadData.first_name,
-        last_name: leadData.last_name,
-        email: leadData.email,
-        mobile_number: leadData.mobile_number,
-        company: leadData.company,
-        lead_value: leadData.lead_value,
-        channel: leadData.channel || sourceName,
-        campaign_name: leadData.campaign_name,
-        campaign_id: leadData.campaign_id,
-        adgroup_id: leadData.adgroup_id,
-        keyword: leadData.keyword,
-        country: leadData.country,
-        city: leadData.city,
-        state: leadData.state,
-        pincode: leadData.pincode,
-        address_line1: leadData.address_line1,
-        address_line2: leadData.address_line2,
-        university: leadData.university,
-        course: leadData.course,
-        specialization: leadData.specialization,
-        tags: leadData.tags as string[] | null,
+        ...leadWritePayload,
       })
-      .select()
+      .select('id')
       .single();
 
     if (leadError) {
@@ -315,11 +355,14 @@ Deno.serve(async (req: Request) => {
         },
       }
     );
-  } catch (error: any) {
+  } catch (error: unknown) {
     const durationMs = Date.now() - startTime;
-    const errorMessage = error.message || 'Unknown error';
-    const status = error.message.includes('Method not allowed') ? 405 :
-                   error.message.includes('Missing') || error.message.includes('Invalid') ? 401 : 500;
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const status =
+      errorMessage === 'Method not allowed' ? 405 :
+      errorMessage.includes('required field') || errorMessage.includes('Invalid JSON payload') ? 400 :
+      errorMessage.includes('Missing API key') || errorMessage.includes('Invalid API key') || errorMessage.includes('IP address not allowed') ? 401 :
+      500;
 
     await logWebhookRequest(supabase, organizationId, req, requestBody, status, errorMessage, durationMs);
 

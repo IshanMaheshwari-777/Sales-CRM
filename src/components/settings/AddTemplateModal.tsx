@@ -3,6 +3,7 @@ import { X, Mail, MessageCircle, Eye, Sparkles } from 'lucide-react';
 import { TEMPLATE_VARIABLES, insertVariableAtCursor, getPreviewData, replaceTemplateVariables, validateTemplateVariables } from '../../lib/templateVariables';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import { usePermissions } from '../../contexts/PermissionsContext';
 
 interface User {
   id: string;
@@ -27,7 +28,8 @@ interface AddTemplateModalProps {
 }
 
 export function AddTemplateModal({ isOpen, onClose, onSuccess, editingTemplate }: AddTemplateModalProps) {
-  const { user, profile } = useAuth();
+  const { user, profile, organizationMember, organization } = useAuth();
+  const { isAdmin } = usePermissions();
   const [loading, setLoading] = useState(false);
   const [users, setUsers] = useState<User[]>([]);
   const [showPreview, setShowPreview] = useState(false);
@@ -58,20 +60,82 @@ export function AddTemplateModal({ isOpen, onClose, onSuccess, editingTemplate }
       }
       setShowPreview(false);
     }
-  }, [isOpen, editingTemplate]);
+  }, [isOpen, editingTemplate, user?.id, profile?.id, organizationMember?.organization_id, organization?.id]);
+
+  const resolveOrganizationId = async (): Promise<string | null> => {
+    const contextOrganizationId =
+      organizationMember?.organization_id || profile?.organization_id || organization?.id || null;
+
+    if (contextOrganizationId) {
+      return contextOrganizationId;
+    }
+
+    if (!user?.id) {
+      return null;
+    }
+
+    const { data, error } = await supabase
+      .rpc('get_user_organization_id', { user_uuid: user.id });
+
+    if (error) {
+      console.error('Error resolving organization for template flow:', error);
+      return null;
+    }
+
+    return data || null;
+  };
+
+  const getFallbackCurrentUser = (): User[] => {
+    if (!user?.id || !user.email) {
+      return [];
+    }
+
+    const fallbackName = profile?.full_name?.trim() || user.email;
+
+    return [{
+      id: user.id,
+      full_name: fallbackName,
+      email: user.email,
+    }];
+  };
 
   const fetchUsers = async () => {
-    if (!profile?.organization_id) return;
+    await resolveOrganizationId();
 
     const { data, error } = await supabase
       .from('profiles')
       .select('id, full_name, email')
-      .eq('organization_id', profile.organization_id)
       .order('full_name');
 
-    if (!error && data) {
-      setUsers(data);
+    if (error) {
+      console.error('Error loading template users:', error);
+      setUsers(getFallbackCurrentUser());
+      return;
     }
+
+    const dedupedUsers = new Map<string, User>();
+
+    (data || []).forEach((profileRow) => {
+      if (!profileRow.id || !profileRow.email) {
+        return;
+      }
+
+      dedupedUsers.set(profileRow.id, {
+        id: profileRow.id,
+        full_name: profileRow.full_name?.trim() || profileRow.email,
+        email: profileRow.email,
+      });
+    });
+
+    getFallbackCurrentUser().forEach((fallbackUser) => {
+      dedupedUsers.set(fallbackUser.id, fallbackUser);
+    });
+
+    const resolvedUsers = Array.from(dedupedUsers.values()).sort((left, right) =>
+      left.full_name.localeCompare(right.full_name)
+    );
+
+    setUsers(resolvedUsers);
   };
 
   const handleVariableClick = (variableKey: string) => {
@@ -110,6 +174,13 @@ export function AddTemplateModal({ isOpen, onClose, onSuccess, editingTemplate }
   const handleSubmit = async (submitType: 'draft' | 'approval' | 'approve') => {
     if (!user) return;
 
+    const organizationId = await resolveOrganizationId();
+
+    if (!organizationId) {
+      alert('Unable to determine your organization. Please refresh and try again.');
+      return;
+    }
+
     if (!formData.template_name.trim()) {
       alert('Please enter a template name');
       return;
@@ -142,13 +213,6 @@ export function AddTemplateModal({ isOpen, onClose, onSuccess, editingTemplate }
     setLoading(true);
 
     try {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .single();
-
-      const isAdmin = profile?.role === 'admin';
       const isDraft = submitType === 'draft';
       const isApproved = submitType === 'approve' && isAdmin;
 
@@ -162,7 +226,7 @@ export function AddTemplateModal({ isOpen, onClose, onSuccess, editingTemplate }
         is_approved: isApproved,
         approved_by: isApproved ? user.id : null,
         approved_at: isApproved ? new Date().toISOString() : null,
-        organization_id: profile?.organization_id || null,
+        organization_id: organizationId,
       };
 
       let templateId = editingTemplate?.id;
@@ -227,7 +291,7 @@ export function AddTemplateModal({ isOpen, onClose, onSuccess, editingTemplate }
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+    <div data-testid="template-modal" className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
         <div className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -249,6 +313,7 @@ export function AddTemplateModal({ isOpen, onClose, onSuccess, editingTemplate }
           </div>
           <button
             onClick={onClose}
+            data-testid="template-modal-close"
             className="p-2 hover:bg-slate-100 rounded-lg transition"
           >
             <X className="w-5 h-5 text-slate-600" />
@@ -263,6 +328,7 @@ export function AddTemplateModal({ isOpen, onClose, onSuccess, editingTemplate }
                   Template Name <span className="text-red-500">*</span>
                 </label>
                 <input
+                  data-testid="template-name-input"
                   type="text"
                   value={formData.template_name}
                   onChange={(e) => setFormData({ ...formData, template_name: e.target.value })}
@@ -276,6 +342,7 @@ export function AddTemplateModal({ isOpen, onClose, onSuccess, editingTemplate }
                   Template Type <span className="text-red-500">*</span>
                 </label>
                 <select
+                  data-testid="template-type-select"
                   value={formData.template_type}
                   onChange={(e) => setFormData({ ...formData, template_type: e.target.value as 'email' | 'whatsapp' })}
                   disabled={!!editingTemplate}
@@ -293,6 +360,7 @@ export function AddTemplateModal({ isOpen, onClose, onSuccess, editingTemplate }
                   </label>
                   <input
                     ref={subjectInputRef}
+                    data-testid="template-subject-input"
                     type="text"
                     value={formData.subject}
                     onChange={(e) => setFormData({ ...formData, subject: e.target.value })}
@@ -314,6 +382,7 @@ export function AddTemplateModal({ isOpen, onClose, onSuccess, editingTemplate }
                 </div>
                 <textarea
                   ref={bodyTextareaRef}
+                  data-testid="template-body-input"
                   value={formData.body_content}
                   onChange={(e) => setFormData({ ...formData, body_content: e.target.value })}
                   onFocus={() => setActiveInput('body')}
@@ -336,6 +405,7 @@ export function AddTemplateModal({ isOpen, onClose, onSuccess, editingTemplate }
                   <label className="flex items-center gap-2 p-2 hover:bg-slate-50 rounded cursor-pointer border-b border-slate-200 mb-2">
                     <input
                       type="checkbox"
+                      data-testid="template-select-all-users"
                       checked={formData.assigned_users.length === users.length && users.length > 0}
                       onChange={handleSelectAll}
                       className="w-4 h-4 rounded border-slate-300 text-orange-500 focus:ring-orange-500"
@@ -346,6 +416,7 @@ export function AddTemplateModal({ isOpen, onClose, onSuccess, editingTemplate }
                     <label key={user.id} className="flex items-center gap-2 p-2 hover:bg-slate-50 rounded cursor-pointer">
                       <input
                         type="checkbox"
+                        data-testid={`template-assign-user-${user.id}`}
                         checked={formData.assigned_users.includes(user.id)}
                         onChange={() => handleUserToggle(user.id)}
                         className="w-4 h-4 rounded border-slate-300 text-orange-500 focus:ring-orange-500"
@@ -372,6 +443,7 @@ export function AddTemplateModal({ isOpen, onClose, onSuccess, editingTemplate }
                   </label>
                   <button
                     onClick={() => setShowPreview(!showPreview)}
+                    data-testid="template-preview-toggle"
                     className="text-sm text-orange-600 hover:text-orange-700 font-medium flex items-center gap-1"
                   >
                     <Eye className="w-4 h-4" />
@@ -439,6 +511,7 @@ export function AddTemplateModal({ isOpen, onClose, onSuccess, editingTemplate }
         <div className="bg-slate-50 border-t border-slate-200 px-6 py-4 flex items-center justify-between">
           <button
             onClick={onClose}
+            data-testid="template-cancel-button"
             className="px-4 py-2 text-slate-700 hover:bg-slate-200 rounded-lg transition"
             disabled={loading}
           >
@@ -447,6 +520,7 @@ export function AddTemplateModal({ isOpen, onClose, onSuccess, editingTemplate }
           <div className="flex gap-2">
             <button
               onClick={() => handleSubmit('draft')}
+              data-testid="template-save-draft-button"
               className="px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 transition disabled:opacity-50"
               disabled={loading}
             >
@@ -454,6 +528,7 @@ export function AddTemplateModal({ isOpen, onClose, onSuccess, editingTemplate }
             </button>
             <button
               onClick={() => handleSubmit('approval')}
+              data-testid="template-submit-approval-button"
               className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition disabled:opacity-50"
               disabled={loading}
             >

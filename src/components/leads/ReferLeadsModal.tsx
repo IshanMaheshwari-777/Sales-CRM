@@ -2,9 +2,11 @@ import { useState, useEffect } from 'react';
 import { X, UserPlus } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import type { BulkLeadFilterContext } from './bulkFilterContext';
 
 interface ReferLeadsModalProps {
   leadIds: string[];
+  filterContext?: BulkLeadFilterContext;
   onClose: () => void;
   onSuccess: () => void;
 }
@@ -15,8 +17,8 @@ interface Profile {
   email: string;
 }
 
-export function ReferLeadsModal({ leadIds, onClose, onSuccess }: ReferLeadsModalProps) {
-  const { user } = useAuth();
+export function ReferLeadsModal({ leadIds, filterContext, onClose, onSuccess }: ReferLeadsModalProps) {
+  const { user, profile } = useAuth();
   const [users, setUsers] = useState<Profile[]>([]);
   const [selectedUserId, setSelectedUserId] = useState('');
   const [remarks, setRemarks] = useState('');
@@ -25,12 +27,18 @@ export function ReferLeadsModal({ leadIds, onClose, onSuccess }: ReferLeadsModal
 
   useEffect(() => {
     loadUsers();
-  }, []);
+  }, [profile?.organization_id]);
 
   const loadUsers = async () => {
+    if (!profile?.organization_id) {
+      setUsers([]);
+      return;
+    }
+
     const { data } = await supabase
       .from('profiles')
       .select('id, full_name, email')
+      .eq('organization_id', profile.organization_id)
       .order('full_name');
 
     if (data) {
@@ -62,14 +70,26 @@ export function ReferLeadsModal({ leadIds, onClose, onSuccess }: ReferLeadsModal
         .eq('id', selectedUserId)
         .maybeSingle();
 
-      // Use bulk assign RPC function
-      const { data: result, error: rpcError } = await supabase.rpc('bulk_assign_leads', {
-        p_lead_ids: leadIds,
+      const rpcArgs = {
         p_new_owner_id: selectedUserId,
         p_new_owner_name: newOwnerProfile?.full_name || 'Unknown',
         p_assigned_by_id: user?.id || null,
         p_assigned_by_name: currentUserProfile?.full_name || 'Unknown User'
-      });
+      };
+
+      const { data: result, error: rpcError } = leadIds.length > 0
+        ? await supabase.rpc('bulk_assign_leads', {
+            p_lead_ids: leadIds,
+            ...rpcArgs,
+          })
+        : await supabase.rpc('bulk_assign_filtered_leads', {
+            p_organization_id: filterContext?.organizationId,
+            p_search: filterContext?.searchQuery || null,
+            p_active_status_id: filterContext?.activeStatusId || null,
+            p_filters: filterContext?.appliedFilters || {},
+            ...rpcArgs,
+            p_note: remarks || null,
+          });
 
       if (rpcError) {
         console.error('RPC Error:', rpcError);
@@ -87,8 +107,8 @@ export function ReferLeadsModal({ leadIds, onClose, onSuccess }: ReferLeadsModal
         console.warn('No ownership changes - leads may already be assigned to this user');
       }
 
-      // Add remarks as notes if provided
-      if (remarks) {
+      // Add remarks as notes if provided for explicit lead selections
+      if (remarks && leadIds.length > 0) {
         const notePromises = leadIds.map(leadId =>
           supabase
             .from('notes')
@@ -141,7 +161,7 @@ export function ReferLeadsModal({ leadIds, onClose, onSuccess }: ReferLeadsModal
 
             <div className="mb-4 p-3 bg-slate-50 rounded-lg">
               <p className="text-sm text-slate-600">
-                Referring <span className="font-semibold text-slate-900">{leadIds.length}</span> lead{leadIds.length !== 1 ? 's' : ''}
+                Referring <span className="font-semibold text-slate-900">{leadIds.length > 0 ? leadIds.length : filterContext?.totalCount || 0}</span> lead{(leadIds.length > 0 ? leadIds.length : filterContext?.totalCount || 0) !== 1 ? 's' : ''}
               </p>
             </div>
 

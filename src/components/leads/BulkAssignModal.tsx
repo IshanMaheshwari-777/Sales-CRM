@@ -3,17 +3,19 @@ import { X, UserPlus, AlertCircle } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import type { Database } from '../../lib/database.types';
+import type { BulkLeadFilterContext } from './bulkFilterContext';
 
 type Profile = Database['public']['Tables']['profiles']['Row'];
 
 interface BulkAssignModalProps {
   leadIds: string[];
+  filterContext?: BulkLeadFilterContext;
   onClose: () => void;
   onSuccess: () => void;
 }
 
-export function BulkAssignModal({ leadIds, onClose, onSuccess }: BulkAssignModalProps) {
-  const { user } = useAuth();
+export function BulkAssignModal({ leadIds, filterContext, onClose, onSuccess }: BulkAssignModalProps) {
+  const { user, profile } = useAuth();
   const [users, setUsers] = useState<Profile[]>([]);
   const [selectedUser, setSelectedUser] = useState('');
   const [loading, setLoading] = useState(false);
@@ -21,10 +23,20 @@ export function BulkAssignModal({ leadIds, onClose, onSuccess }: BulkAssignModal
 
   useEffect(() => {
     loadUsers();
-  }, []);
+  }, [profile?.organization_id]);
 
   const loadUsers = async () => {
-    const { data } = await supabase.from('profiles').select('*');
+    if (!profile?.organization_id) {
+      setUsers([]);
+      return;
+    }
+
+    const { data } = await supabase
+      .from('profiles')
+      .select('id, full_name, email')
+      .eq('organization_id', profile.organization_id)
+      .order('full_name');
+
     if (data) {
       setUsers(data);
     }
@@ -53,14 +65,26 @@ export function BulkAssignModal({ leadIds, onClose, onSuccess }: BulkAssignModal
         .eq('id', user?.id)
         .single();
 
-      // Use RPC function for bulk assignment
-      const { data, error: rpcError } = await supabase.rpc('bulk_assign_leads', {
-        p_lead_ids: leadIds,
+      const rpcArgs = {
         p_new_owner_id: selectedUser,
         p_new_owner_name: selectedUserData?.full_name || 'Unknown',
         p_assigned_by_id: user?.id,
         p_assigned_by_name: currentUserData?.full_name || 'Unknown User',
-      });
+      };
+
+      const { data, error: rpcError } = leadIds.length > 0
+        ? await supabase.rpc('bulk_assign_leads', {
+            p_lead_ids: leadIds,
+            ...rpcArgs,
+          })
+        : await supabase.rpc('bulk_assign_filtered_leads', {
+            p_organization_id: filterContext?.organizationId,
+            p_search: filterContext?.searchQuery || null,
+            p_active_status_id: filterContext?.activeStatusId || null,
+            p_filters: filterContext?.appliedFilters || {},
+            ...rpcArgs,
+            p_note: null,
+          });
 
       if (rpcError) throw rpcError;
 
@@ -98,8 +122,8 @@ export function BulkAssignModal({ leadIds, onClose, onSuccess }: BulkAssignModal
         <div className="p-6 space-y-4">
           <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-start gap-2">
             <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
-            <p className="text-sm text-blue-800">
-              You are about to assign <strong>{leadIds.length}</strong> lead{leadIds.length !== 1 ? 's' : ''} to a new owner.
+              <p className="text-sm text-blue-800">
+              You are about to assign <strong>{leadIds.length > 0 ? leadIds.length : filterContext?.totalCount || 0}</strong> lead{(leadIds.length > 0 ? leadIds.length : filterContext?.totalCount || 0) !== 1 ? 's' : ''} to a new owner.
             </p>
           </div>
 

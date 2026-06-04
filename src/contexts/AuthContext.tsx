@@ -73,16 +73,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (memberData) {
           setOrganizationMember(memberData);
+        } else {
+          setOrganizationMember(null);
+        }
 
+        const selectedOrganizationId =
+          profileData.organization_id || memberData?.organization_id || null;
+
+        if (selectedOrganizationId) {
           const { data: orgData } = await supabase
             .from('organizations')
             .select('*')
-            .eq('id', memberData.organization_id)
+            .eq('id', selectedOrganizationId)
             .maybeSingle();
 
-          if (orgData) {
-            setOrganization(orgData);
-          }
+          setOrganization(orgData || null);
+        } else {
+          setOrganization(null);
         }
       }
     } catch (error) {
@@ -137,6 +144,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .from('profiles')
         .update({ last_login_at: new Date().toISOString() })
         .eq('id', data.user.id);
+
+      await loadProfile(data.user.id);
     }
 
     return { error };

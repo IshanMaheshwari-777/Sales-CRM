@@ -12,7 +12,8 @@ import BulkUploadModal from './BulkUploadModal';
 import { BulkActionsMenu } from './BulkActionsMenu';
 import { BulkAssignModal } from './BulkAssignModal';
 import { exportLeadsToCSV, type LeadExportData } from '../../lib/csvExport';
-import { RefreshCw, Filter, Upload } from 'lucide-react';
+import { ChevronLeft, ChevronRight, RefreshCw, Filter, Upload } from 'lucide-react';
+import type { BulkLeadFilterContext } from './bulkFilterContext';
 
 type LeadStatus = Database['public']['Tables']['lead_statuses']['Row'];
 type Lead = Database['public']['Tables']['leads']['Row'] & {
@@ -21,6 +22,8 @@ type Lead = Database['public']['Tables']['leads']['Row'] & {
   profiles: { full_name: string } | null;
   lead_sources: { name: string; color: string } | null;
 };
+
+const PAGE_SIZE = 50;
 
 interface LeadManagerProps {
   onAddLead: () => void;
@@ -33,8 +36,11 @@ export function LeadManager({ onAddLead, showAddLead, onCloseAddLead, searchQuer
   const { profile } = useAuth();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [statuses, setStatuses] = useState<LeadStatus[]>([]);
+  const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
   const [activeStatus, setActiveStatus] = useState<string>('all');
   const [loading, setLoading] = useState(true);
+  const [totalLeadCount, setTotalLeadCount] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [appliedFilters, setAppliedFilters] = useState<FilterCriteria>({
     assignedTo: [],
@@ -57,13 +63,29 @@ export function LeadManager({ onAddLead, showAddLead, onCloseAddLead, searchQuer
   const [showChangeStageModal, setShowChangeStageModal] = useState(false);
   const [showChangeStageConfirmDialog, setShowChangeStageConfirmDialog] = useState(false);
   const [showBulkUploadModal, setShowBulkUploadModal] = useState(false);
+  const [bulkActionScope, setBulkActionScope] = useState<'selected' | 'filtered'>('selected');
 
   useEffect(() => {
     if (profile?.organization_id) {
       loadStatuses();
-      loadLeads();
     }
   }, [profile?.organization_id]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, appliedFilters, activeStatus]);
+
+  useEffect(() => {
+    if (profile?.organization_id) {
+      loadLeads();
+    }
+  }, [profile?.organization_id, searchQuery, appliedFilters, activeStatus, currentPage]);
+
+  useEffect(() => {
+    if (profile?.organization_id && statuses.length > 0) {
+      loadStatusCounts();
+    }
+  }, [profile?.organization_id, statuses, searchQuery, appliedFilters]);
 
   const loadStatuses = async () => {
     const { data } = await supabase
@@ -78,6 +100,100 @@ export function LeadManager({ onAddLead, showAddLead, onCloseAddLead, searchQuer
     }
   };
 
+  const applySearch = (query: any) => {
+    const trimmedQuery = searchQuery.trim();
+    if (!trimmedQuery) {
+      return query;
+    }
+
+    const escapedQuery = trimmedQuery.replace(/[%_]/g, '\\$&');
+    return query.or(
+      `first_name.ilike.%${escapedQuery}%,last_name.ilike.%${escapedQuery}%,name.ilike.%${escapedQuery}%,email.ilike.%${escapedQuery}%,mobile_number.ilike.%${escapedQuery}%`
+    );
+  };
+
+  const applyFilters = (query: any, includeActiveStatus = true) => {
+    let nextQuery = query;
+
+    if (profile?.organization_id) {
+      nextQuery = nextQuery.eq('organization_id', profile.organization_id);
+    }
+
+    nextQuery = applySearch(nextQuery);
+
+    if (includeActiveStatus && activeStatus !== 'all') {
+      const selectedStatus = statuses.find((status) => status.name === activeStatus);
+      if (selectedStatus) {
+        nextQuery = nextQuery.eq('status_id', selectedStatus.id);
+      }
+    }
+
+    if (appliedFilters.assignedTo?.length) {
+      nextQuery = nextQuery.in('current_lead_owner', appliedFilters.assignedTo);
+    }
+    if (appliedFilters.campaignNames?.length) {
+      nextQuery = nextQuery.in('campaign_name', appliedFilters.campaignNames);
+    }
+    if (appliedFilters.channels?.length) {
+      nextQuery = nextQuery.in('channel', appliedFilters.channels);
+    }
+    if (appliedFilters.sources?.length) {
+      nextQuery = nextQuery.in('source_id', appliedFilters.sources);
+    }
+    if (appliedFilters.statuses?.length) {
+      nextQuery = nextQuery.in('status_id', appliedFilters.statuses);
+    }
+    if (appliedFilters.subStatuses?.length) {
+      nextQuery = nextQuery.in('sub_status_id', appliedFilters.subStatuses);
+    }
+    if (appliedFilters.dateAddedFrom) {
+      nextQuery = nextQuery.gte('created_at', appliedFilters.dateAddedFrom);
+    }
+    if (appliedFilters.dateAddedTo) {
+      nextQuery = nextQuery.lte('created_at', appliedFilters.dateAddedTo);
+    }
+    if (appliedFilters.dateEditedFrom) {
+      nextQuery = nextQuery.gte('updated_at', appliedFilters.dateEditedFrom);
+    }
+    if (appliedFilters.dateEditedTo) {
+      nextQuery = nextQuery.lte('updated_at', appliedFilters.dateEditedTo);
+    }
+    if (appliedFilters.leadAgeMin !== undefined) {
+      const maxCreatedAt = new Date(Date.now() - (appliedFilters.leadAgeMin * 24 * 60 * 60 * 1000)).toISOString();
+      nextQuery = nextQuery.lte('created_at', maxCreatedAt);
+    }
+    if (appliedFilters.leadAgeMax !== undefined) {
+      const minCreatedAt = new Date(Date.now() - (appliedFilters.leadAgeMax * 24 * 60 * 60 * 1000)).toISOString();
+      nextQuery = nextQuery.gte('created_at', minCreatedAt);
+    }
+    if (appliedFilters.cities?.length) {
+      nextQuery = nextQuery.in('city', appliedFilters.cities);
+    }
+    if (appliedFilters.countries?.length) {
+      nextQuery = nextQuery.in('country', appliedFilters.countries);
+    }
+    if (appliedFilters.currentOwners?.length) {
+      nextQuery = nextQuery.in('current_lead_owner', appliedFilters.currentOwners);
+    }
+    if (appliedFilters.isReEnquired !== null && appliedFilters.isReEnquired !== undefined) {
+      nextQuery = nextQuery.eq('is_re_enquired', appliedFilters.isReEnquired);
+    }
+    if (appliedFilters.callCountMin !== undefined) {
+      nextQuery = nextQuery.gte('call_count', appliedFilters.callCountMin);
+    }
+    if (appliedFilters.callCountMax !== undefined) {
+      nextQuery = nextQuery.lte('call_count', appliedFilters.callCountMax);
+    }
+    if (appliedFilters.dateFrom) {
+      nextQuery = nextQuery.gte('created_at', appliedFilters.dateFrom);
+    }
+    if (appliedFilters.dateTo) {
+      nextQuery = nextQuery.lte('created_at', appliedFilters.dateTo);
+    }
+
+    return nextQuery;
+  };
+
   const loadLeads = async () => {
     if (!profile?.organization_id) {
       setLoading(false);
@@ -85,149 +201,65 @@ export function LeadManager({ onAddLead, showAddLead, onCloseAddLead, searchQuer
     }
 
     setLoading(true);
-    const { data } = await supabase
-      .from('leads')
-      .select(`
-        *,
-        lead_statuses:status_id (*),
-        sub_status:sub_status_id (*),
-        profiles:current_lead_owner (full_name),
-        previous_owner_profile:previous_lead_owner (full_name),
-        lead_sources (name, color)
-      `)
-      .eq('organization_id', profile.organization_id)
-      .order('created_at', { ascending: false });
+    const from = (currentPage - 1) * PAGE_SIZE;
+    const to = from + PAGE_SIZE - 1;
 
-    if (data) {
-      setLeads(data as Lead[]);
+    const countQuery = applyFilters(
+      supabase.from('leads').select('id', { count: 'exact', head: true })
+    );
+
+    const dataQuery = applyFilters(
+      supabase
+        .from('leads')
+        .select(`
+          *,
+          lead_statuses:status_id (*),
+          sub_status:sub_status_id (*),
+          profiles:current_lead_owner (full_name),
+          previous_owner_profile:previous_lead_owner (full_name),
+          lead_sources (name, color)
+        `)
+    )
+      .order('created_at', { ascending: false })
+      .range(from, to);
+
+    const [{ count, error: countError }, { data, error: dataError }] = await Promise.all([countQuery, dataQuery]);
+
+    if (countError) {
+      console.error('Failed to count leads:', countError);
     }
+    if (dataError) {
+      console.error('Failed to load leads:', dataError);
+    }
+
+    setTotalLeadCount(count || 0);
+    setLeads((data || []) as Lead[]);
     setLoading(false);
   };
 
-  const applySearchFilter = (leads: Lead[]) => {
-    if (!searchQuery || searchQuery.trim() === '') {
-      return leads;
-    }
+  const loadStatusCounts = async () => {
+    const countEntries = await Promise.all([
+      Promise.resolve(['all', await applyFilters(
+        supabase.from('leads').select('id', { count: 'exact', head: true }),
+        false
+      )] as const),
+      ...statuses.map(async (status) => {
+        const result = await applyFilters(
+          supabase.from('leads').select('id', { count: 'exact', head: true }).eq('status_id', status.id),
+          false
+        );
+        return [status.name, result] as const;
+      }),
+    ]);
 
-    const query = searchQuery.toLowerCase().trim();
-
-    return leads.filter(lead => {
-      const fullName = `${lead.first_name || ''} ${lead.last_name || ''} ${lead.name || ''}`.toLowerCase();
-      const email = (lead.email || '').toLowerCase();
-      const mobile = (lead.mobile_number || '').toLowerCase();
-
-      return fullName.includes(query) || email.includes(query) || mobile.includes(query);
+    const nextCounts: Record<string, number> = {};
+    countEntries.forEach(([key, result]) => {
+      nextCounts[key] = result.count || 0;
     });
+    setStatusCounts(nextCounts);
   };
 
-  const applyAdvancedFilters = (leads: Lead[]) => {
-    let filtered = [...leads];
-
-    filtered = applySearchFilter(filtered);
-
-    if (appliedFilters.assignedTo && appliedFilters.assignedTo.length > 0) {
-      filtered = filtered.filter(lead => lead.current_lead_owner && appliedFilters.assignedTo.includes(lead.current_lead_owner));
-    }
-
-    if (appliedFilters.campaignNames && appliedFilters.campaignNames.length > 0) {
-      filtered = filtered.filter(lead => lead.campaign_name && appliedFilters.campaignNames.includes(lead.campaign_name));
-    }
-
-    if (appliedFilters.channels && appliedFilters.channels.length > 0) {
-      filtered = filtered.filter(lead => lead.channel && appliedFilters.channels.includes(lead.channel));
-    }
-
-    if (appliedFilters.sources && appliedFilters.sources.length > 0) {
-      filtered = filtered.filter(lead => lead.source_id && appliedFilters.sources.includes(lead.source_id));
-    }
-
-    if (appliedFilters.statuses && appliedFilters.statuses.length > 0) {
-      filtered = filtered.filter(lead => lead.status_id && appliedFilters.statuses.includes(lead.status_id));
-    }
-
-    if (appliedFilters.subStatuses && appliedFilters.subStatuses.length > 0) {
-      filtered = filtered.filter(lead => lead.sub_status_id && appliedFilters.subStatuses.includes(lead.sub_status_id));
-    }
-
-    if (appliedFilters.dateAddedFrom) {
-      filtered = filtered.filter(lead => new Date(lead.created_at) >= new Date(appliedFilters.dateAddedFrom!));
-    }
-
-    if (appliedFilters.dateAddedTo) {
-      filtered = filtered.filter(lead => new Date(lead.created_at) <= new Date(appliedFilters.dateAddedTo!));
-    }
-
-    if (appliedFilters.dateEditedFrom) {
-      filtered = filtered.filter(lead => new Date(lead.updated_at) >= new Date(appliedFilters.dateEditedFrom!));
-    }
-
-    if (appliedFilters.dateEditedTo) {
-      filtered = filtered.filter(lead => new Date(lead.updated_at) <= new Date(appliedFilters.dateEditedTo!));
-    }
-
-    if (appliedFilters.leadAgeMin !== undefined) {
-      filtered = filtered.filter(lead => {
-        const age = Math.floor((Date.now() - new Date(lead.created_at).getTime()) / (1000 * 60 * 60 * 24));
-        return age >= appliedFilters.leadAgeMin!;
-      });
-    }
-
-    if (appliedFilters.leadAgeMax !== undefined) {
-      filtered = filtered.filter(lead => {
-        const age = Math.floor((Date.now() - new Date(lead.created_at).getTime()) / (1000 * 60 * 60 * 24));
-        return age <= appliedFilters.leadAgeMax!;
-      });
-    }
-
-
-    if (appliedFilters.cities && appliedFilters.cities.length > 0) {
-      filtered = filtered.filter(lead => lead.city && appliedFilters.cities.includes(lead.city));
-    }
-
-    if (appliedFilters.countries && appliedFilters.countries.length > 0) {
-      filtered = filtered.filter(lead => lead.country && appliedFilters.countries.includes(lead.country));
-    }
-
-    if (appliedFilters.currentOwners && appliedFilters.currentOwners.length > 0) {
-      filtered = filtered.filter(lead => lead.current_lead_owner && appliedFilters.currentOwners.includes(lead.current_lead_owner));
-    }
-
-    if (appliedFilters.isReEnquired !== null && appliedFilters.isReEnquired !== undefined) {
-      filtered = filtered.filter(lead => lead.is_re_enquired === appliedFilters.isReEnquired);
-    }
-
-    if (appliedFilters.callCountMin !== undefined) {
-      filtered = filtered.filter(lead => lead.call_count >= appliedFilters.callCountMin!);
-    }
-
-    if (appliedFilters.callCountMax !== undefined) {
-      filtered = filtered.filter(lead => lead.call_count <= appliedFilters.callCountMax!);
-    }
-
-    if (appliedFilters.dateFrom) {
-      filtered = filtered.filter(lead => new Date(lead.created_at) >= new Date(appliedFilters.dateFrom!));
-    }
-
-    if (appliedFilters.dateTo) {
-      filtered = filtered.filter(lead => new Date(lead.created_at) <= new Date(appliedFilters.dateTo!));
-    }
-
-    return filtered;
-  };
-
-  const getStatusCount = (statusName: string) => {
-    const statusFiltered = statusName === 'all'
-      ? leads
-      : leads.filter(lead => lead.lead_statuses?.name === statusName);
-
-    return applyAdvancedFilters(statusFiltered).length;
-  };
-
-  const filteredLeads = applyAdvancedFilters(
-    activeStatus === 'all'
-      ? leads
-      : leads.filter(lead => lead.lead_statuses?.name === activeStatus)
-  );
+  const getStatusCount = (statusName: string) => statusCounts[statusName] || 0;
 
   const hasActiveFilters = () => {
     return (
@@ -271,6 +303,7 @@ export function LeadManager({ onAddLead, showAddLead, onCloseAddLead, searchQuer
 
   const handleReferClick = () => {
     if (selectedLeadIds.size > 0) {
+      setBulkActionScope('selected');
       setShowReferModal(true);
     } else {
       setShowConfirmDialog(true);
@@ -278,14 +311,15 @@ export function LeadManager({ onAddLead, showAddLead, onCloseAddLead, searchQuer
   };
 
   const handleConfirmReferAll = () => {
-    const allLeadIds = new Set(filteredLeads.map(lead => lead.id));
-    setSelectedLeadIds(allLeadIds);
+    setBulkActionScope('filtered');
+    setSelectedLeadIds(new Set());
     setShowConfirmDialog(false);
     setShowReferModal(true);
   };
 
   const handleReferSuccess = () => {
     setShowReferModal(false);
+    setBulkActionScope('selected');
     setSelectedLeadIds(new Set());
     loadLeads();
   };
@@ -319,15 +353,20 @@ export function LeadManager({ onAddLead, showAddLead, onCloseAddLead, searchQuer
 
   const handleConfirmDeleteAll = async () => {
     setShowDeleteAllConfirmDialog(false);
-    const allLeadIds = filteredLeads.map(lead => lead.id);
 
     try {
-      const { error } = await supabase
-        .from('leads')
-        .delete()
-        .in('id', allLeadIds);
+      const filterContext = getBulkFilterContext();
+      const { data, error } = await supabase.rpc('bulk_delete_filtered_leads', {
+        p_organization_id: filterContext.organizationId,
+        p_search: filterContext.searchQuery || null,
+        p_active_status_id: filterContext.activeStatusId || null,
+        p_filters: filterContext.appliedFilters,
+      });
 
       if (error) throw error;
+      if (data && !data.success) {
+        throw new Error(data.error || 'Failed to delete leads');
+      }
 
       setSelectedLeadIds(new Set());
       loadLeads();
@@ -345,27 +384,29 @@ export function LeadManager({ onAddLead, showAddLead, onCloseAddLead, searchQuer
   };
 
   const handleConfirmChangeStageAll = () => {
-    const allLeadIds = new Set(filteredLeads.map(lead => lead.id));
-    setSelectedLeadIds(allLeadIds);
+    setBulkActionScope('filtered');
+    setSelectedLeadIds(new Set());
     setShowChangeStageConfirmDialog(false);
     setShowChangeStageModal(true);
   };
 
   const handleChangeStageSuccess = () => {
     setShowChangeStageModal(false);
+    setBulkActionScope('selected');
     setSelectedLeadIds(new Set());
     loadLeads();
   };
 
   const handleEditFromCard = (leadId: string) => {
+    setBulkActionScope('selected');
     setSelectedLeadIds(new Set([leadId]));
     setShowChangeStageModal(true);
   };
 
   const handleExportLeads = async () => {
     const leadsToExport = selectedLeadIds.size > 0
-      ? filteredLeads.filter(lead => selectedLeadIds.has(lead.id))
-      : filteredLeads;
+      ? leads.filter(lead => selectedLeadIds.has(lead.id))
+      : leads;
 
     const exportData = leadsToExport as LeadExportData[];
     const timestamp = new Date().toISOString().split('T')[0];
@@ -374,25 +415,46 @@ export function LeadManager({ onAddLead, showAddLead, onCloseAddLead, searchQuer
 
   const handleBulkAssign = () => {
     if (selectedLeadIds.size === 0) {
-      const allLeadIds = new Set(filteredLeads.map(lead => lead.id));
-      setSelectedLeadIds(allLeadIds);
+      setBulkActionScope('filtered');
+      setSelectedLeadIds(new Set());
+    } else {
+      setBulkActionScope('selected');
     }
     setShowBulkAssignModal(true);
   };
 
   const handleBulkAssignSuccess = () => {
     setShowBulkAssignModal(false);
+    setBulkActionScope('selected');
     setSelectedLeadIds(new Set());
     loadLeads();
   };
 
   const handleBulkChangeStatus = () => {
     if (selectedLeadIds.size === 0) {
-      const allLeadIds = new Set(filteredLeads.map(lead => lead.id));
-      setSelectedLeadIds(allLeadIds);
+      setBulkActionScope('filtered');
+      setSelectedLeadIds(new Set());
+    } else {
+      setBulkActionScope('selected');
     }
     setShowChangeStageModal(true);
   };
+
+  const getBulkFilterContext = (): BulkLeadFilterContext => {
+    const activeStatusId = activeStatus === 'all'
+      ? null
+      : statuses.find((status) => status.name === activeStatus)?.id || null;
+
+    return {
+      organizationId: profile?.organization_id || '',
+      searchQuery,
+      activeStatusId,
+      appliedFilters,
+      totalCount: totalLeadCount,
+    };
+  };
+
+  const totalPages = Math.max(1, Math.ceil(totalLeadCount / PAGE_SIZE));
 
   const handleBulkDelete = () => {
     if (selectedLeadIds.size > 0) {
@@ -438,7 +500,7 @@ export function LeadManager({ onAddLead, showAddLead, onCloseAddLead, searchQuer
           <div className="flex items-center gap-2 text-sm text-slate-600">
             <span className="font-medium">Search results:</span>
             <span className="px-2 py-1 bg-orange-100 text-orange-700 rounded-lg font-semibold">
-              {filteredLeads.length} lead{filteredLeads.length !== 1 ? 's' : ''} found
+              {totalLeadCount} lead{totalLeadCount !== 1 ? 's' : ''} found
             </span>
           </div>
         )}
@@ -453,7 +515,7 @@ export function LeadManager({ onAddLead, showAddLead, onCloseAddLead, searchQuer
           </button>
           <div className="w-px h-6 bg-slate-200" />
           <BulkActionsMenu
-            selectedCount={selectedLeadIds.size > 0 ? selectedLeadIds.size : filteredLeads.length}
+            selectedCount={selectedLeadIds.size > 0 ? selectedLeadIds.size : totalLeadCount}
             onExport={handleExportLeads}
             onDownload={handleExportLeads}
             onAssign={handleBulkAssign}
@@ -491,13 +553,40 @@ export function LeadManager({ onAddLead, showAddLead, onCloseAddLead, searchQuer
           </div>
         ) : (
           <LeadList
-            leads={filteredLeads}
+            leads={leads}
             onRefresh={loadLeads}
             selectedLeadIds={selectedLeadIds}
             onSelectChange={handleSelectChange}
             onEdit={handleEditFromCard}
           />
         )}
+      </div>
+
+      <div className="flex items-center justify-between border-t border-slate-200 px-6 py-3 text-sm text-slate-600">
+        <span>
+          Showing {leads.length === 0 ? 0 : ((currentPage - 1) * PAGE_SIZE) + 1}-{((currentPage - 1) * PAGE_SIZE) + leads.length} of {totalLeadCount}
+        </span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+            disabled={currentPage === 1 || loading}
+            className="flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <ChevronLeft className="h-4 w-4" />
+            Previous
+          </button>
+          <span className="px-2 font-medium text-slate-700">
+            Page {currentPage} of {totalPages}
+          </span>
+          <button
+            onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+            disabled={currentPage >= totalPages || loading}
+            className="flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Next
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
       {showAddLead && (
@@ -521,6 +610,7 @@ export function LeadManager({ onAddLead, showAddLead, onCloseAddLead, searchQuer
       {showReferModal && (
         <ReferLeadsModal
           leadIds={Array.from(selectedLeadIds)}
+          filterContext={bulkActionScope === 'filtered' ? getBulkFilterContext() : undefined}
           onClose={() => setShowReferModal(false)}
           onSuccess={handleReferSuccess}
         />
@@ -529,6 +619,7 @@ export function LeadManager({ onAddLead, showAddLead, onCloseAddLead, searchQuer
       {showBulkAssignModal && (
         <BulkAssignModal
           leadIds={Array.from(selectedLeadIds)}
+          filterContext={bulkActionScope === 'filtered' ? getBulkFilterContext() : undefined}
           onClose={() => setShowBulkAssignModal(false)}
           onSuccess={handleBulkAssignSuccess}
         />
@@ -537,7 +628,7 @@ export function LeadManager({ onAddLead, showAddLead, onCloseAddLead, searchQuer
       {showConfirmDialog && (
         <ConfirmationDialog
           title="Refer All Leads"
-          message={`No leads are selected. Do you want to refer all ${filteredLeads.length} lead${filteredLeads.length !== 1 ? 's' : ''} in the current ${activeStatus === 'all' ? 'view' : activeStatus + ' status'}?`}
+          message={`No leads are selected. Do you want to refer all ${totalLeadCount} lead${totalLeadCount !== 1 ? 's' : ''} in the current ${activeStatus === 'all' ? 'view' : activeStatus + ' status'}?`}
           confirmText="Refer All"
           onConfirm={handleConfirmReferAll}
           onCancel={() => setShowConfirmDialog(false)}
@@ -557,7 +648,7 @@ export function LeadManager({ onAddLead, showAddLead, onCloseAddLead, searchQuer
       {showDeleteAllConfirmDialog && (
         <ConfirmationDialog
           title="Delete All Leads"
-          message={`No leads are selected. Do you want to delete all ${filteredLeads.length} lead${filteredLeads.length !== 1 ? 's' : ''} in the current ${activeStatus === 'all' ? 'view' : activeStatus + ' status'}? This action cannot be undone.`}
+          message={`No leads are selected. Do you want to delete all ${totalLeadCount} lead${totalLeadCount !== 1 ? 's' : ''} in the current ${activeStatus === 'all' ? 'view' : activeStatus + ' status'}? This action cannot be undone.`}
           confirmText="Delete All"
           onConfirm={handleConfirmDeleteAll}
           onCancel={() => setShowDeleteAllConfirmDialog(false)}
@@ -567,6 +658,7 @@ export function LeadManager({ onAddLead, showAddLead, onCloseAddLead, searchQuer
       {showChangeStageModal && (
         <ChangeStageModal
           leadIds={Array.from(selectedLeadIds)}
+          filterContext={bulkActionScope === 'filtered' ? getBulkFilterContext() : undefined}
           onClose={() => setShowChangeStageModal(false)}
           onSuccess={handleChangeStageSuccess}
         />
@@ -575,7 +667,7 @@ export function LeadManager({ onAddLead, showAddLead, onCloseAddLead, searchQuer
       {showChangeStageConfirmDialog && (
         <ConfirmationDialog
           title="Change Stage for All Leads"
-          message={`No leads are selected. Do you want to change the stage for all ${filteredLeads.length} lead${filteredLeads.length !== 1 ? 's' : ''} in the current ${activeStatus === 'all' ? 'view' : activeStatus + ' status'}?`}
+          message={`No leads are selected. Do you want to change the stage for all ${totalLeadCount} lead${totalLeadCount !== 1 ? 's' : ''} in the current ${activeStatus === 'all' ? 'view' : activeStatus + ' status'}?`}
           confirmText="Change All"
           onConfirm={handleConfirmChangeStageAll}
           onCancel={() => setShowChangeStageConfirmDialog(false)}

@@ -43,15 +43,14 @@ export function AddWebhookConfigModal({ onClose, onSuccess }: AddWebhookConfigMo
       if (!profile?.organization_id) throw new Error('Organization not found');
 
       const apiKey = generateApiKey();
-      const hmacSecret = generateHmacSecret();
-
       const { error: insertError } = await supabase
         .from('webhook_configurations')
         .insert({
           organization_id: profile.organization_id,
           webhook_name: webhookName,
           api_key: apiKey,
-          hmac_secret: hmacSecret,
+          // Kept for schema compatibility, but the inbound webhook no longer exposes HMAC setup.
+          hmac_secret: generateHmacSecret(),
           is_enabled: true,
           rate_limit_per_minute: rateLimit,
           created_by: user.id,
@@ -121,8 +120,8 @@ export function AddWebhookConfigModal({ onClose, onSuccess }: AddWebhookConfigMo
 
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
             <p className="text-sm text-blue-900">
-              API Key and HMAC Secret will be automatically generated and displayed after creation.
-              Make sure to save them securely.
+              A single organization webhook API key will be generated automatically after creation.
+              Use that key in the `X-API-Key` header when sending leads into the CRM.
             </p>
           </div>
 

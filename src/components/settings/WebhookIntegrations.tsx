@@ -1,15 +1,15 @@
-import { useState, useEffect } from 'react';
-import { Webhook, Plus, Copy, Check, RotateCw, Eye, EyeOff, Trash2, Play, Settings } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Webhook, Plus, Copy, Check, Trash2, Settings } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
-import { AddWebhookConfigModal } from './AddWebhookConfigModal';
 import { AddIntegrationEndpointModal } from './AddIntegrationEndpointModal';
 import { WebhookLogsViewer } from './WebhookLogsViewer';
+import { isIgnorableRequestError } from '../../lib/requestErrors';
+import { useAuth } from '../../contexts/AuthContext';
 
 interface WebhookConfig {
   id: string;
   webhook_name: string;
   api_key: string;
-  hmac_secret: string;
   is_enabled: boolean;
   rate_limit_per_minute: number;
   created_at: string;
@@ -24,77 +24,139 @@ interface IntegrationEndpoint {
   created_at: string;
 }
 
-interface WebhookSource {
-  id: string;
-  source_name: string;
-  source_type: string;
-  is_active: boolean;
-  created_at: string;
-}
+type ActiveView = 'incoming' | 'outgoing' | 'logs';
 
-type ActiveView = 'incoming' | 'outgoing' | 'sources' | 'logs';
+const canonicalPayload = `{
+  "source": "Facebook Ads",
+  "lead": {
+    "full_name": "John Doe",
+    "mobile_number": "+919999999999",
+    "email": "john@example.com",
+    "city": "Pune",
+    "state": "Maharashtra",
+    "country": "India",
+    "company": "Acme",
+    "course": "MBA",
+    "specialization": "Marketing",
+    "campaign_name": "April Campaign",
+    "campaign_id": "123",
+    "adgroup_id": "456"
+  }
+}`;
 
 export function WebhookIntegrations() {
+  const { profile, organization, organizationMember } = useAuth();
   const [activeView, setActiveView] = useState<ActiveView>('incoming');
   const [webhookConfigs, setWebhookConfigs] = useState<WebhookConfig[]>([]);
   const [endpoints, setEndpoints] = useState<IntegrationEndpoint[]>([]);
-  const [sources, setSources] = useState<WebhookSource[]>([]);
   const [loading, setLoading] = useState(false);
+  const [configError, setConfigError] = useState<string | null>(null);
   const [copiedField, setCopiedField] = useState<string | null>(null);
-  const [revealedSecrets, setRevealedSecrets] = useState<Set<string>>(new Set());
-  const [showAddConfigModal, setShowAddConfigModal] = useState(false);
   const [showAddEndpointModal, setShowAddEndpointModal] = useState(false);
 
   const webhookInboundUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/webhook-inbound`;
+  const activeOrganizationId =
+    profile?.organization_id || organization?.id || organizationMember?.organization_id || null;
+  const activeOrganizationName = organization?.name || 'Organization';
 
   useEffect(() => {
-    fetchWebhookConfigs();
-    fetchIntegrationEndpoints();
-    fetchWebhookSources();
-  }, []);
+    if (!activeOrganizationId) {
+      setWebhookConfigs([]);
+      setEndpoints([]);
+      return;
+    }
 
-  const fetchWebhookConfigs = async () => {
+    const controller = new AbortController();
+    fetchWebhookConfigs(activeOrganizationId, controller.signal);
+    fetchIntegrationEndpoints(activeOrganizationId, controller.signal);
+    return () => controller.abort();
+  }, [activeOrganizationId]);
+
+  const generateApiKey = () => {
+    const array = new Uint8Array(32);
+    crypto.getRandomValues(array);
+    return 'whk_' + Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
+  };
+
+  const generateCompatSecret = () => {
+    const array = new Uint8Array(32);
+    crypto.getRandomValues(array);
+    return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
+  };
+
+  const ensurePrimaryWebhookConfig = async (organizationId: string) => {
+    const { data: existingConfig, error: existingError } = await supabase
+      .from('webhook_configurations')
+      .select('id, webhook_name, api_key, is_enabled, rate_limit_per_minute, created_at')
+      .eq('organization_id', organizationId)
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (existingError) {
+      throw existingError;
+    }
+
+    if (existingConfig && existingConfig.length > 0) {
+      return existingConfig;
+    }
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      throw new Error('Not authenticated');
+    }
+
+    const { data: insertedConfig, error: insertError } = await supabase
+      .from('webhook_configurations')
+      .insert({
+        organization_id: organizationId,
+        webhook_name: `${activeOrganizationName} Primary Webhook`,
+        api_key: generateApiKey(),
+        hmac_secret: generateCompatSecret(),
+        is_enabled: true,
+        rate_limit_per_minute: 60,
+        created_by: user.id,
+      })
+      .select('id, webhook_name, api_key, is_enabled, rate_limit_per_minute, created_at')
+      .single();
+
+    if (insertError) {
+      throw insertError;
+    }
+
+    return insertedConfig ? [insertedConfig] : [];
+  };
+
+  const fetchWebhookConfigs = async (organizationId: string, signal?: AbortSignal) => {
     setLoading(true);
+    setConfigError(null);
     try {
-      const { data, error } = await supabase
-        .from('webhook_configurations')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setWebhookConfigs(data || []);
+      const data = await ensurePrimaryWebhookConfig(organizationId);
+      setWebhookConfigs(data);
     } catch (error) {
-      console.error('Error fetching webhook configs:', error);
+      if (!isIgnorableRequestError(error)) {
+        console.error('Error fetching webhook configs:', error);
+        setConfigError(error instanceof Error ? error.message : 'Unable to prepare webhook key');
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchIntegrationEndpoints = async () => {
+  const fetchIntegrationEndpoints = async (organizationId: string, signal?: AbortSignal) => {
     try {
       const { data, error } = await supabase
         .from('integration_endpoints')
         .select('*')
+        .eq('organization_id', organizationId)
+        .abortSignal(signal ?? new AbortController().signal)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
       setEndpoints(data || []);
     } catch (error) {
-      console.error('Error fetching endpoints:', error);
-    }
-  };
-
-  const fetchWebhookSources = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('webhook_sources')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setSources(data || []);
-    } catch (error) {
-      console.error('Error fetching sources:', error);
+      if (!isIgnorableRequestError(error)) {
+        console.error('Error fetching endpoints:', error);
+      }
     }
   };
 
@@ -108,25 +170,18 @@ export function WebhookIntegrations() {
     }
   };
 
-  const toggleSecretVisibility = (configId: string) => {
-    const newRevealed = new Set(revealedSecrets);
-    if (newRevealed.has(configId)) {
-      newRevealed.delete(configId);
-    } else {
-      newRevealed.add(configId);
-    }
-    setRevealedSecrets(newRevealed);
-  };
-
   const toggleConfigStatus = async (configId: string, currentStatus: boolean) => {
     try {
       const { error } = await supabase
         .from('webhook_configurations')
         .update({ is_enabled: !currentStatus })
-        .eq('id', configId);
+        .eq('id', configId)
+        .eq('organization_id', activeOrganizationId);
 
       if (error) throw error;
-      await fetchWebhookConfigs();
+      if (activeOrganizationId) {
+        await fetchWebhookConfigs(activeOrganizationId);
+      }
     } catch (error) {
       console.error('Error toggling config status:', error);
     }
@@ -137,10 +192,13 @@ export function WebhookIntegrations() {
       const { error } = await supabase
         .from('integration_endpoints')
         .update({ is_active: !currentStatus })
-        .eq('id', endpointId);
+        .eq('id', endpointId)
+        .eq('organization_id', activeOrganizationId);
 
       if (error) throw error;
-      await fetchIntegrationEndpoints();
+      if (activeOrganizationId) {
+        await fetchIntegrationEndpoints(activeOrganizationId);
+      }
     } catch (error) {
       console.error('Error toggling endpoint status:', error);
     }
@@ -153,10 +211,13 @@ export function WebhookIntegrations() {
       const { error } = await supabase
         .from('webhook_configurations')
         .delete()
-        .eq('id', configId);
+        .eq('id', configId)
+        .eq('organization_id', activeOrganizationId);
 
       if (error) throw error;
-      await fetchWebhookConfigs();
+      if (activeOrganizationId) {
+        await fetchWebhookConfigs(activeOrganizationId);
+      }
     } catch (error) {
       console.error('Error deleting config:', error);
     }
@@ -169,17 +230,16 @@ export function WebhookIntegrations() {
       const { error } = await supabase
         .from('integration_endpoints')
         .delete()
-        .eq('id', endpointId);
+        .eq('id', endpointId)
+        .eq('organization_id', activeOrganizationId);
 
       if (error) throw error;
-      await fetchIntegrationEndpoints();
+      if (activeOrganizationId) {
+        await fetchIntegrationEndpoints(activeOrganizationId);
+      }
     } catch (error) {
       console.error('Error deleting endpoint:', error);
     }
-  };
-
-  const testWebhook = async () => {
-    alert('Webhook test functionality will trigger a test payload to your configured endpoints.');
   };
 
   return (
@@ -188,7 +248,7 @@ export function WebhookIntegrations() {
         <div>
           <h2 className="text-2xl font-bold text-gray-900">Webhook Integrations</h2>
           <p className="text-sm text-gray-600 mt-1">
-            Configure incoming webhooks and outgoing integrations for lead automation
+            Configure one canonical inbound lead contract and your outbound integrations.
           </p>
         </div>
       </div>
@@ -216,16 +276,6 @@ export function WebhookIntegrations() {
             Outgoing Integrations
           </button>
           <button
-            onClick={() => setActiveView('sources')}
-            className={`py-4 px-1 border-b-2 font-medium text-sm ${
-              activeView === 'sources'
-                ? 'border-blue-500 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-            }`}
-          >
-            Lead Sources
-          </button>
-          <button
             onClick={() => setActiveView('logs')}
             className={`py-4 px-1 border-b-2 font-medium text-sm ${
               activeView === 'logs'
@@ -242,36 +292,68 @@ export function WebhookIntegrations() {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold text-gray-900">Incoming Webhook Configuration</h3>
-            <button
-              onClick={() => setShowAddConfigModal(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-            >
-              <Plus className="w-4 h-4" />
-              Add Configuration
-            </button>
           </div>
 
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <div className="flex items-start gap-3">
-              <Webhook className="w-5 h-5 text-blue-600 mt-0.5" />
-              <div className="flex-1">
-                <h4 className="font-medium text-blue-900 mb-2">Webhook Endpoint URL</h4>
-                <div className="flex items-center gap-2 bg-white p-3 rounded border border-blue-200">
-                  <code className="text-sm text-gray-700 flex-1 break-all">{webhookInboundUrl}</code>
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <div className="flex items-start gap-3">
+                <Webhook className="w-5 h-5 text-blue-600 mt-0.5" />
+                <div className="flex-1 space-y-3">
+                  <div>
+                    <h4 className="font-medium text-blue-900 mb-2">Webhook Endpoint URL</h4>
+                    <div className="flex items-center gap-2 bg-white p-3 rounded border border-blue-200">
+                      <code className="text-sm text-gray-700 flex-1 break-all">{webhookInboundUrl}</code>
+                      <button
+                        onClick={() => copyToClipboard(webhookInboundUrl, 'webhook-url')}
+                        className="p-2 hover:bg-gray-100 rounded"
+                      >
+                        {copiedField === 'webhook-url' ? (
+                          <Check className="w-4 h-4 text-green-600" />
+                        ) : (
+                          <Copy className="w-4 h-4 text-gray-600" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="text-sm text-blue-900">
+                    <p className="font-medium mb-1">Canonical inbound contract</p>
+                    <p>Authenticate with a single `X-API-Key` header. No timestamp or HMAC signature is required.</p>
+                  </div>
+
+                  <div className="text-sm text-blue-900">
+                    <p className="font-medium mb-1">Mandatory fields</p>
+                    <p>`source`, `lead.full_name`, `lead.mobile_number`, and `lead.email` are required for every webhook lead.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white border border-gray-200 rounded-lg p-4 space-y-3">
+              <div>
+                <h4 className="font-medium text-gray-900">Required Header</h4>
+                <div className="bg-gray-50 border border-gray-200 rounded p-3 mt-2">
+                  <code className="text-sm text-gray-700">X-API-Key: your_organization_webhook_key</code>
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between">
+                  <h4 className="font-medium text-gray-900">Canonical Payload Example</h4>
                   <button
-                    onClick={() => copyToClipboard(webhookInboundUrl, 'webhook-url')}
+                    onClick={() => copyToClipboard(canonicalPayload, 'canonical-payload')}
                     className="p-2 hover:bg-gray-100 rounded"
                   >
-                    {copiedField === 'webhook-url' ? (
+                    {copiedField === 'canonical-payload' ? (
                       <Check className="w-4 h-4 text-green-600" />
                     ) : (
                       <Copy className="w-4 h-4 text-gray-600" />
                     )}
                   </button>
                 </div>
-                <p className="text-sm text-blue-700 mt-2">
-                  Use this URL to receive leads from external sources. Each configuration below provides unique credentials.
-                </p>
+                <pre className="mt-2 bg-gray-50 border border-gray-200 rounded p-3 text-xs overflow-x-auto text-gray-700">
+                  {canonicalPayload}
+                </pre>
               </div>
             </div>
           </div>
@@ -280,16 +362,24 @@ export function WebhookIntegrations() {
             <div className="text-center py-8">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
             </div>
+          ) : configError ? (
+            <div className="text-center py-12 bg-red-50 rounded-lg border border-red-200">
+              <Webhook className="w-12 h-12 text-red-300 mx-auto mb-3" />
+              <p className="text-red-700 font-medium">Unable to prepare the organization webhook key</p>
+              <p className="text-sm text-red-600 mt-2">{configError}</p>
+              {activeOrganizationId && (
+                <button
+                  onClick={() => fetchWebhookConfigs(activeOrganizationId)}
+                  className="mt-4 text-red-700 hover:text-red-800 font-medium"
+                >
+                  Retry
+                </button>
+              )}
+            </div>
           ) : webhookConfigs.length === 0 ? (
             <div className="text-center py-12 bg-gray-50 rounded-lg border border-gray-200">
               <Webhook className="w-12 h-12 text-gray-400 mx-auto mb-3" />
-              <p className="text-gray-600">No webhook configurations yet</p>
-              <button
-                onClick={() => setShowAddConfigModal(true)}
-                className="mt-4 text-blue-600 hover:text-blue-700 font-medium"
-              >
-                Create your first configuration
-              </button>
+              <p className="text-gray-600">Preparing the organization webhook key...</p>
             </div>
           ) : (
             <div className="space-y-4">
@@ -320,53 +410,20 @@ export function WebhookIntegrations() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">API Key</label>
-                      <div className="flex items-center gap-2 bg-gray-50 p-2 rounded border border-gray-200">
-                        <code className="text-sm text-gray-700 flex-1 truncate">{config.api_key}</code>
-                        <button
-                          onClick={() => copyToClipboard(config.api_key, `api-key-${config.id}`)}
-                          className="p-1 hover:bg-gray-200 rounded"
-                        >
-                          {copiedField === `api-key-${config.id}` ? (
-                            <Check className="w-4 h-4 text-green-600" />
-                          ) : (
-                            <Copy className="w-4 h-4 text-gray-600" />
-                          )}
-                        </button>
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">HMAC Secret</label>
-                      <div className="flex items-center gap-2 bg-gray-50 p-2 rounded border border-gray-200">
-                        <code className="text-sm text-gray-700 flex-1 truncate">
-                          {revealedSecrets.has(config.id) ? config.hmac_secret : '••••••••••••••••'}
-                        </code>
-                        <button
-                          onClick={() => toggleSecretVisibility(config.id)}
-                          className="p-1 hover:bg-gray-200 rounded"
-                        >
-                          {revealedSecrets.has(config.id) ? (
-                            <EyeOff className="w-4 h-4 text-gray-600" />
-                          ) : (
-                            <Eye className="w-4 h-4 text-gray-600" />
-                          )}
-                        </button>
-                        {revealedSecrets.has(config.id) && (
-                          <button
-                            onClick={() => copyToClipboard(config.hmac_secret, `hmac-${config.id}`)}
-                            className="p-1 hover:bg-gray-200 rounded"
-                          >
-                            {copiedField === `hmac-${config.id}` ? (
-                              <Check className="w-4 h-4 text-green-600" />
-                            ) : (
-                              <Copy className="w-4 h-4 text-gray-600" />
-                            )}
-                          </button>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Organization Webhook API Key</label>
+                    <div className="flex items-center gap-2 bg-gray-50 p-2 rounded border border-gray-200">
+                      <code className="text-sm text-gray-700 flex-1 truncate">{config.api_key}</code>
+                      <button
+                        onClick={() => copyToClipboard(config.api_key, `api-key-${config.id}`)}
+                        className="p-1 hover:bg-gray-200 rounded"
+                      >
+                        {copiedField === `api-key-${config.id}` ? (
+                          <Check className="w-4 h-4 text-green-600" />
+                        ) : (
+                          <Copy className="w-4 h-4 text-gray-600" />
                         )}
-                      </div>
+                      </button>
                     </div>
                   </div>
 
@@ -453,53 +510,17 @@ export function WebhookIntegrations() {
         </div>
       )}
 
-      {activeView === 'sources' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold text-gray-900">Lead Sources</h3>
-            <p className="text-sm text-gray-600">Manage lead source configurations and field mappings</p>
-          </div>
-
-          {sources.length === 0 ? (
-            <div className="text-center py-12 bg-gray-50 rounded-lg border border-gray-200">
-              <p className="text-gray-600">No lead sources configured</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {sources.map((source) => (
-                <div key={source.id} className="bg-white border border-gray-200 rounded-lg p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <h4 className="font-semibold text-gray-900">{source.source_name}</h4>
-                    <div className={`w-2 h-2 rounded-full ${source.is_active ? 'bg-green-500' : 'bg-gray-400'}`}></div>
-                  </div>
-                  <p className="text-sm text-gray-600">{source.source_type}</p>
-                  <p className="text-xs text-gray-500 mt-2">
-                    Created: {new Date(source.created_at).toLocaleDateString()}
-                  </p>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {activeView === 'logs' && <WebhookLogsViewer />}
-
-      {showAddConfigModal && (
-        <AddWebhookConfigModal
-          onClose={() => setShowAddConfigModal(false)}
-          onSuccess={() => {
-            fetchWebhookConfigs();
-            setShowAddConfigModal(false);
-          }}
-        />
+      {activeView === 'logs' && activeOrganizationId && (
+        <WebhookLogsViewer activeOrganizationId={activeOrganizationId} />
       )}
 
       {showAddEndpointModal && (
         <AddIntegrationEndpointModal
           onClose={() => setShowAddEndpointModal(false)}
           onSuccess={() => {
-            fetchIntegrationEndpoints();
+            if (activeOrganizationId) {
+              fetchIntegrationEndpoints(activeOrganizationId);
+            }
             setShowAddEndpointModal(false);
           }}
         />

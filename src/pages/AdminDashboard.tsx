@@ -1,48 +1,31 @@
-import { useState, useEffect } from 'react';
+import { Suspense, lazy, useMemo, useState } from 'react';
 import { Users, Shield, UsersRound, Mail, GitBranch, Webhook } from 'lucide-react';
-import { UserManagement } from '../components/admin/UserManagement';
-import { RolePermissionsMatrix } from '../components/admin/RolePermissionsMatrix';
-import { TeamManagement } from '../components/admin/TeamManagement';
-import { InvitationManagement } from '../components/admin/InvitationManagement';
-import { AssignmentRulesManagement } from '../components/admin/AssignmentRulesManagement';
-import { WebhookManagement } from '../components/admin/WebhookManagement';
 import { usePermissions } from '../contexts/PermissionsContext';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase } from '../lib/supabase';
 
 type TabType = 'users' | 'permissions' | 'teams' | 'invitations' | 'assignmentRules' | 'webhooks';
 
+const UserManagement = lazy(() => import('../components/admin/UserManagement').then((module) => ({ default: module.UserManagement })));
+const RolePermissionsMatrix = lazy(() => import('../components/admin/RolePermissionsMatrix').then((module) => ({ default: module.RolePermissionsMatrix })));
+const TeamManagement = lazy(() => import('../components/admin/TeamManagement').then((module) => ({ default: module.TeamManagement })));
+const InvitationManagement = lazy(() => import('../components/admin/InvitationManagement').then((module) => ({ default: module.InvitationManagement })));
+const AssignmentRulesManagement = lazy(() => import('../components/admin/AssignmentRulesManagement').then((module) => ({ default: module.AssignmentRulesManagement })));
+const WebhookManagement = lazy(() => import('../components/admin/WebhookManagement').then((module) => ({ default: module.WebhookManagement })));
+
+function AdminTabLoader() {
+  return (
+    <div className="flex h-full min-h-[240px] items-center justify-center">
+      <div className="h-10 w-10 animate-spin rounded-full border-4 border-orange-500 border-t-transparent" />
+    </div>
+  );
+}
+
 export function AdminDashboard() {
   const { isSuperAdmin, userProfile } = usePermissions();
-  const { profile } = useAuth();
+  const { profile, organization } = useAuth();
   const [activeTab, setActiveTab] = useState<TabType>('users');
-  const [organizationId, setOrganizationId] = useState<string | null>(null);
-  const [organizationName, setOrganizationName] = useState<string>('');
-
-  useEffect(() => {
-    loadOrganization();
-  }, [profile?.organization_id]);
-
-  const loadOrganization = async () => {
-    try {
-      const orgId = profile?.organization_id;
-      if (!orgId) return;
-
-      setOrganizationId(orgId);
-
-      const { data: orgData, error: orgError } = await supabase
-        .from('organizations')
-        .select('name')
-        .eq('id', orgId)
-        .single();
-
-      if (orgError) throw orgError;
-
-      setOrganizationName(orgData?.name || 'Unknown Organization');
-    } catch (error) {
-      console.error('Error loading organization:', error);
-    }
-  };
+  const organizationId = profile?.organization_id || organization?.id || null;
+  const organizationName = organization?.name || 'Unknown Organization';
 
   const tabs = [
     { id: 'users' as TabType, label: 'User Management', icon: Users },
@@ -52,6 +35,25 @@ export function AdminDashboard() {
     { id: 'assignmentRules' as TabType, label: 'Assignment Rules', icon: GitBranch },
     { id: 'webhooks' as TabType, label: 'Webhook Integrations', icon: Webhook },
   ];
+
+  const activeContent = useMemo(() => {
+    switch (activeTab) {
+      case 'users':
+        return <UserManagement organizationId={organizationId} isSuperAdminView={false} />;
+      case 'invitations':
+        return <InvitationManagement />;
+      case 'permissions':
+        return <RolePermissionsMatrix />;
+      case 'teams':
+        return <TeamManagement organizationId={organizationId} isSuperAdminView={false} />;
+      case 'assignmentRules':
+        return <AssignmentRulesManagement />;
+      case 'webhooks':
+        return <WebhookManagement />;
+      default:
+        return null;
+    }
+  }, [activeTab, organizationId]);
 
   return (
     <div className="h-full flex flex-col bg-gray-50">
@@ -91,12 +93,9 @@ export function AdminDashboard() {
       </div>
 
       <div className="flex-1 overflow-auto">
-        {activeTab === 'users' && <UserManagement organizationId={organizationId} isSuperAdminView={false} />}
-        {activeTab === 'invitations' && <InvitationManagement />}
-        {activeTab === 'permissions' && <RolePermissionsMatrix />}
-        {activeTab === 'teams' && <TeamManagement organizationId={organizationId} isSuperAdminView={false} />}
-        {activeTab === 'assignmentRules' && <AssignmentRulesManagement />}
-        {activeTab === 'webhooks' && <WebhookManagement />}
+        <Suspense fallback={<AdminTabLoader />}>
+          {activeContent}
+        </Suspense>
       </div>
     </div>
   );

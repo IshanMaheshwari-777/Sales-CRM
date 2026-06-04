@@ -1,16 +1,20 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { Session, User } from '@supabase/supabase-js';
-import { supabase } from '../../src/lib/supabase';
+import { splitFullName } from '../lib/leadQueue';
+import { mobileSupabase } from '../lib/supabaseClient';
 
 interface Profile {
   id: string;
   email: string;
+  full_name: string;
   first_name: string;
   last_name: string;
-  mobile_number: string;
-  role_id: string;
+  mobile_number: string | null;
+  role_id: string | null;
   role_name: string;
-  organization_id: string;
+  team_id: string | null;
+  manager_id: string | null;
+  organization_id: string | null;
   organization_name: string;
 }
 
@@ -47,7 +51,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    mobileSupabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
@@ -59,7 +63,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = mobileSupabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
@@ -75,35 +79,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const loadProfile = async (userId: string) => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await mobileSupabase
         .from('profiles')
-        .select(`
-          id,
-          email,
-          first_name,
-          last_name,
-          mobile_number,
-          role_id,
-          organization_id,
-          role:roles(name),
-          organization:organizations(name)
-        `)
+        .select('id, email, full_name, mobile_number, role_id, team_id, manager_id, organization_id')
         .eq('id', userId)
         .single();
 
       if (error) throw error;
 
       if (data) {
+        const [{ data: roleData }, { data: organizationData }] = await Promise.all([
+          data.role_id
+            ? mobileSupabase.from('roles').select('role_name').eq('id', data.role_id).single()
+            : Promise.resolve({ data: null }),
+          data.organization_id
+            ? mobileSupabase.from('organizations').select('name').eq('id', data.organization_id).single()
+            : Promise.resolve({ data: null }),
+        ]);
+
+        const { firstName, lastName } = splitFullName(data.full_name);
         setProfile({
           id: data.id,
           email: data.email,
-          first_name: data.first_name,
-          last_name: data.last_name,
+          full_name: data.full_name,
+          first_name: firstName,
+          last_name: lastName,
           mobile_number: data.mobile_number,
           role_id: data.role_id,
-          role_name: data.role?.name || 'User',
+          role_name: roleData?.role_name || 'User',
+          team_id: data.team_id,
+          manager_id: data.manager_id,
           organization_id: data.organization_id,
-          organization_name: data.organization?.name || 'Unknown',
+          organization_name: organizationData?.name || 'Unknown',
         });
       }
     } catch (error) {
@@ -114,7 +121,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
+    const { error } = await mobileSupabase.auth.signInWithPassword({
       email,
       password,
     });
@@ -122,7 +129,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signOut = async () => {
-    const { error } = await supabase.auth.signOut();
+    const { error } = await mobileSupabase.auth.signOut();
     if (error) throw error;
     setUser(null);
     setProfile(null);

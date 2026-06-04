@@ -1,14 +1,9 @@
 import {
-  BarChart3,
   Users,
-  Database,
   Calendar,
   CheckSquare,
-  Megaphone,
   Workflow,
   Settings,
-  Wrench,
-  Plug,
   LifeBuoy,
   Activity,
   Shield,
@@ -31,18 +26,14 @@ interface MenuItem {
 }
 
 const menuItems: MenuItem[] = [
-  { id: 'dashboard', label: 'Analytics Dashboard', icon: BarChart3 },
   { id: 'leads', label: 'Lead Manager', icon: Users },
-  { id: 'raw-data', label: 'Raw Data Manager', icon: Database },
   { id: 'followups', label: 'Follow-ups Manager', icon: Calendar },
   { id: 'analytics', label: 'System Analytics', icon: Activity },
   { id: 'bulk-actions', label: 'Bulk Actions', icon: CheckSquare, requiredPermission: 'bulk_actions.upload' },
-  { id: 'marketing', label: 'Bulk Marketing Campaign', icon: Megaphone },
-  { id: 'workflow', label: 'Workflow Automation', icon: Workflow },
+  { id: 'workflow', label: 'Workflow Automation', icon: Workflow, adminOnly: true },
   { id: 'settings', label: 'Basic Settings', icon: Settings },
   { id: 'super-admin', label: 'Super Admin Dashboard', icon: ShieldCheck, superAdminOnly: true },
   { id: 'admin', label: 'Admin Dashboard', icon: Shield, adminOnly: true },
-  { id: 'integration', label: 'Third Party Integration', icon: Plug },
 ];
 
 export function Sidebar({ activeSection, onSectionChange }: SidebarProps) {
@@ -75,7 +66,7 @@ export function Sidebar({ activeSection, onSectionChange }: SidebarProps) {
     return true;
   };
   return (
-    <div className="w-60 bg-slate-50 border-r border-slate-200 flex flex-col h-screen">
+    <div data-testid="app-sidebar" className="w-60 bg-slate-50 border-r border-slate-200 flex flex-col h-screen">
       <div className="p-4 border-b border-slate-200">
         <div className="flex items-center gap-2">
           <div className="w-10 h-10 bg-gradient-to-br from-orange-500 to-orange-600 rounded-lg flex items-center justify-center">
@@ -97,6 +88,7 @@ export function Sidebar({ activeSection, onSectionChange }: SidebarProps) {
             <button
               key={item.id}
               onClick={() => onSectionChange(item.id)}
+              data-testid={`nav-${item.id}`}
               className={`w-full flex items-center gap-3 px-4 py-3 transition-colors ${
                 isActive
                   ? 'bg-orange-50 border-r-4 border-orange-500 text-orange-600'

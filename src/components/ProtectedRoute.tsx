@@ -18,8 +18,8 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // If there's an invitation token and no user, show invitation acceptance
-  if (hasInvitationToken && !user) {
+  // Invitation links must take precedence over any existing session.
+  if (hasInvitationToken) {
     return <InvitationAcceptance />;
   }
 

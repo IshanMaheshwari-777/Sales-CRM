@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo } from 'react';
 import { RefreshCw, Filter, CreditCard as Edit, MoreVertical } from 'lucide-react';
 import { AddRuleModal } from '../settings/AddRuleModal';
 import { supabase } from '../../lib/supabase';
+import { isIgnorableRequestError } from '../../lib/requestErrors';
 
 interface AssignmentRule {
   id: string;
@@ -56,15 +57,18 @@ export function AssignmentRulesManagement() {
   }, []);
 
   useEffect(() => {
-    fetchAssignmentRules();
+    const controller = new AbortController();
+    fetchAssignmentRules(controller.signal);
+    return () => controller.abort();
   }, []);
 
-  const fetchAssignmentRules = async () => {
+  const fetchAssignmentRules = async (signal?: AbortSignal) => {
     setLoading(true);
     try {
       const { data, error } = await supabase
         .from('assignment_rules_detailed')
         .select('*')
+        .abortSignal(signal ?? new AbortController().signal)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -96,7 +100,9 @@ export function AssignmentRulesManagement() {
 
       setRules(formattedRules);
     } catch (error) {
-      console.error('Error fetching assignment rules:', error);
+      if (!isIgnorableRequestError(error)) {
+        console.error('Error fetching assignment rules:', error);
+      }
     } finally {
       setLoading(false);
     }

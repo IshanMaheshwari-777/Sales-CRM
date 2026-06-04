@@ -4,16 +4,18 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { logStatusChange, logFollowupCreated } from '../../services/activityLogger';
 import type { Database } from '../../lib/database.types';
+import type { BulkLeadFilterContext } from './bulkFilterContext';
 
 type LeadStatus = Database['public']['Tables']['lead_statuses']['Row'];
 
 interface ChangeStageModalProps {
   leadIds: string[];
+  filterContext?: BulkLeadFilterContext;
   onClose: () => void;
   onSuccess: () => void;
 }
 
-export function ChangeStageModal({ leadIds, onClose, onSuccess }: ChangeStageModalProps) {
+export function ChangeStageModal({ leadIds, filterContext, onClose, onSuccess }: ChangeStageModalProps) {
   const { user } = useAuth();
   const [mainStatuses, setMainStatuses] = useState<LeadStatus[]>([]);
   const [subStatuses, setSubStatuses] = useState<LeadStatus[]>([]);
@@ -90,15 +92,25 @@ export function ChangeStageModal({ leadIds, onClose, onSuccess }: ChangeStageMod
         .eq('id', user?.id || '')
         .single();
 
-      // Use optimized RPC function for bulk status changes
-      const { data: rpcResult, error: rpcError } = await supabase
-        .rpc('bulk_change_lead_status', {
-          p_lead_ids: leadIds,
-          p_status_id: selectedStage,
-          p_sub_status_id: selectedSubStage || null,
-          p_user_id: user?.id || null,
-          p_user_name: currentUserProfile?.full_name || 'Unknown User'
-        });
+      const rpcArgs = {
+        p_status_id: selectedStage,
+        p_sub_status_id: selectedSubStage || null,
+        p_user_id: user?.id || null,
+        p_user_name: currentUserProfile?.full_name || 'Unknown User'
+      };
+
+      const { data: rpcResult, error: rpcError } = leadIds.length > 0
+        ? await supabase.rpc('bulk_change_lead_status', {
+            p_lead_ids: leadIds,
+            ...rpcArgs,
+          })
+        : await supabase.rpc('bulk_change_filtered_lead_status', {
+            p_organization_id: filterContext?.organizationId,
+            p_search: filterContext?.searchQuery || null,
+            p_active_status_id: filterContext?.activeStatusId || null,
+            p_filters: filterContext?.appliedFilters || {},
+            ...rpcArgs,
+          });
 
       if (rpcError) throw rpcError;
 

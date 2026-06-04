@@ -19,6 +19,7 @@ export function BasicSettings() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
+              data-testid={`settings-tab-${tab.id}`}
               className={`px-6 py-4 font-medium text-sm whitespace-nowrap transition border-b-2 ${
                 activeTab === tab.id
                   ? 'border-orange-500 text-slate-900'

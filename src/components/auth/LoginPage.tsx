@@ -97,7 +97,7 @@ export function LoginPage() {
 
   if (view === 'reset-sent') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center p-4">
+      <div data-testid="auth-reset-sent-view" className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center p-4">
         <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-8 text-center">
           <div className="flex items-center justify-center mb-6">
             <div className="bg-green-100 p-4 rounded-full">
@@ -114,6 +114,7 @@ export function LoginPage() {
           </p>
           <button
             onClick={() => switchView('login')}
+            data-testid="auth-reset-back-to-login"
             className="w-full bg-orange-500 text-white py-3 rounded-lg font-semibold hover:bg-orange-600 transition"
           >
             Back to Sign In
@@ -125,10 +126,11 @@ export function LoginPage() {
 
   if (view === 'forgot-password') {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center p-4">
+      <div data-testid="auth-forgot-password-view" className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center p-4">
         <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-8">
           <button
             onClick={() => switchView('login')}
+            data-testid="auth-back-to-login"
             className="flex items-center gap-2 text-slate-500 hover:text-slate-700 text-sm mb-6 transition"
           >
             <ArrowLeft className="w-4 h-4" />
@@ -153,6 +155,7 @@ export function LoginPage() {
               </label>
               <input
                 id="reset-email"
+                data-testid="auth-reset-email-input"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -172,6 +175,7 @@ export function LoginPage() {
             <button
               type="submit"
               disabled={loading}
+              data-testid="auth-reset-submit"
               className="w-full bg-orange-500 text-white py-3 rounded-lg font-semibold hover:bg-orange-600 transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? 'Sending...' : 'Send Reset Link'}
@@ -183,7 +187,7 @@ export function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center p-4">
+    <div data-testid={`auth-${view}-view`} className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-8">
         <div className="flex items-center justify-center mb-8">
           <div className="bg-orange-500 p-3 rounded-xl">
@@ -207,6 +211,7 @@ export function LoginPage() {
                 </label>
                 <input
                   id="firstName"
+                  data-testid="auth-signup-first-name-input"
                   type="text"
                   value={firstName}
                   onChange={(e) => setFirstName(e.target.value)}
@@ -221,6 +226,7 @@ export function LoginPage() {
                 </label>
                 <input
                   id="lastName"
+                  data-testid="auth-signup-last-name-input"
                   type="text"
                   value={lastName}
                   onChange={(e) => setLastName(e.target.value)}
@@ -238,6 +244,7 @@ export function LoginPage() {
             </label>
             <input
               id="email"
+              data-testid="auth-email-input"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -256,6 +263,7 @@ export function LoginPage() {
                 <button
                   type="button"
                   onClick={() => switchView('forgot-password')}
+                  data-testid="auth-forgot-password-trigger"
                   className="text-sm text-orange-500 hover:text-orange-600 font-medium transition"
                 >
                   Forgot password?
@@ -264,6 +272,7 @@ export function LoginPage() {
             </div>
             <input
               id="password"
+              data-testid="auth-password-input"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -288,6 +297,7 @@ export function LoginPage() {
           <button
             type="submit"
             disabled={loading}
+            data-testid={view === 'login' ? 'auth-login-submit' : 'auth-signup-submit'}
             className="w-full bg-orange-500 text-white py-3 rounded-lg font-semibold hover:bg-orange-600 transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? 'Please wait...' : view === 'login' ? 'Sign In' : 'Create Account'}
@@ -297,6 +307,7 @@ export function LoginPage() {
         <div className="mt-6 text-center">
           <button
             onClick={() => switchView(view === 'login' ? 'signup' : 'login')}
+            data-testid={view === 'login' ? 'auth-switch-to-signup' : 'auth-switch-to-login'}
             className="text-orange-500 hover:text-orange-600 font-medium text-sm"
           >
             {view === 'login' ? "Don't have an account? Sign up" : 'Already have an account? Sign in'}

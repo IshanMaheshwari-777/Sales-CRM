@@ -1,15 +1,25 @@
-import { useState } from 'react';
+import { Suspense, lazy, useState } from 'react';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
-import { LeadManager } from '../leads/LeadManager';
-import { BasicSettings } from '../settings/BasicSettings';
-import { FollowupsManager } from '../followups/FollowupsManager';
-import { AdminAnalytics } from '../../pages/AdminAnalytics';
-import { BulkActionsModule } from '../../pages/BulkActionsModule';
-import { AdminDashboard } from '../../pages/AdminDashboard';
-import { SuperAdminDashboard } from '../../pages/SuperAdminDashboard';
 import { ReminderProvider } from '../../contexts/ReminderContext';
 import { FollowupReminderToast } from '../notifications/FollowupReminderToast';
+
+const LeadManager = lazy(() => import('../leads/LeadManager').then((module) => ({ default: module.LeadManager })));
+const BasicSettings = lazy(() => import('../settings/BasicSettings').then((module) => ({ default: module.BasicSettings })));
+const FollowupsManager = lazy(() => import('../followups/FollowupsManager').then((module) => ({ default: module.FollowupsManager })));
+const AdminAnalytics = lazy(() => import('../../pages/AdminAnalytics').then((module) => ({ default: module.AdminAnalytics })));
+const BulkActionsModule = lazy(() => import('../../pages/BulkActionsModule').then((module) => ({ default: module.BulkActionsModule })));
+const AdminDashboard = lazy(() => import('../../pages/AdminDashboard').then((module) => ({ default: module.AdminDashboard })));
+const SuperAdminDashboard = lazy(() => import('../../pages/SuperAdminDashboard').then((module) => ({ default: module.SuperAdminDashboard })));
+const WorkflowAutomationPage = lazy(() => import('../../pages/WorkflowAutomationPage').then((module) => ({ default: module.WorkflowAutomationPage })));
+
+function SectionLoader() {
+  return (
+    <div className="flex h-full min-h-[320px] items-center justify-center p-6 text-slate-500">
+      Loading module...
+    </div>
+  );
+}
 
 export function MainLayout() {
   const [activeSection, setActiveSection] = useState('leads');
@@ -36,8 +46,6 @@ export function MainLayout() {
     switch (activeSection) {
       case 'leads':
         return <LeadManager onAddLead={() => setShowAddLead(true)} showAddLead={showAddLead} onCloseAddLead={() => setShowAddLead(false)} searchQuery={activeSearchQuery} />;
-      case 'dashboard':
-        return <div className="p-6"><h2 className="text-2xl font-bold text-slate-800">Analytics Dashboard</h2><p className="text-slate-600 mt-2">Coming soon...</p></div>;
       case 'analytics':
         return <AdminAnalytics />;
       case 'settings':
@@ -46,6 +54,8 @@ export function MainLayout() {
         return <FollowupsManager selectedFollowupId={selectedFollowupId} onFollowupViewed={() => setSelectedFollowupId(null)} />;
       case 'bulk-actions':
         return <BulkActionsModule />;
+      case 'workflow':
+        return <WorkflowAutomationPage />;
       case 'super-admin':
         return <SuperAdminDashboard />;
       case 'admin':
@@ -77,7 +87,9 @@ export function MainLayout() {
           />
 
           <main className="flex-1 overflow-auto">
-            {renderContent()}
+            <Suspense fallback={<SectionLoader />}>
+              {renderContent()}
+            </Suspense>
           </main>
         </div>
       </div>

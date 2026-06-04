@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Mail, UserPlus, Copy, Check, X, Clock, Trash2, RefreshCw } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { usePermissions } from '../../contexts/PermissionsContext';
+import { buildInvitationLink } from '../../utils/invitations';
 
 interface Invitation {
   id: string;
@@ -133,7 +134,7 @@ export function InvitationManagement() {
   };
 
   const handleCopyInviteLink = async (invitationId: string) => {
-    const inviteLink = `${window.location.origin}?token=${invitationId}`;
+    const inviteLink = buildInvitationLink(invitationId);
     await navigator.clipboard.writeText(inviteLink);
     setCopiedId(invitationId);
     setTimeout(() => setCopiedId(null), 2000);
@@ -280,6 +281,7 @@ export function InvitationManagement() {
             {capacity.can_invite && (
               <button
                 onClick={() => setShowInviteForm(true)}
+                data-testid="admin-invite-user-button"
                 className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
               >
                 <UserPlus className="w-4 h-4" />
@@ -297,7 +299,7 @@ export function InvitationManagement() {
 
       {/* Invite Form */}
       {showInviteForm && (
-        <div className="mb-6 bg-white border border-gray-200 rounded-lg p-5">
+        <div data-testid="admin-invitation-form" className="mb-6 bg-white border border-gray-200 rounded-lg p-5">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-gray-900">Send Invitation</h3>
             <button
@@ -305,6 +307,7 @@ export function InvitationManagement() {
                 setShowInviteForm(false);
                 setError(null);
               }}
+              data-testid="admin-invitation-close"
               className="p-1 hover:bg-gray-100 rounded"
             >
               <X className="w-5 h-5 text-gray-500" />
@@ -324,6 +327,7 @@ export function InvitationManagement() {
               </label>
               <input
                 type="email"
+                data-testid="admin-invitation-email"
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -338,6 +342,7 @@ export function InvitationManagement() {
               </label>
               <select
                 value={formData.role_id}
+                data-testid="admin-invitation-role"
                 onChange={(e) => setFormData({ ...formData, role_id: e.target.value })}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 required
@@ -359,6 +364,7 @@ export function InvitationManagement() {
                   setShowInviteForm(false);
                   setError(null);
                 }}
+                data-testid="admin-invitation-cancel"
                 className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
               >
                 Cancel
@@ -366,6 +372,7 @@ export function InvitationManagement() {
               <button
                 type="submit"
                 disabled={sending}
+                data-testid="admin-invitation-submit"
                 className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
               >
                 {sending ? 'Sending...' : 'Send Invitation'}

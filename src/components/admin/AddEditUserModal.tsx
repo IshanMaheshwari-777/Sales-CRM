@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { OrganizationSelector } from '../common/OrganizationSelector';
 import { usePermissions } from '../../contexts/PermissionsContext';
+import { buildInvitationLink } from '../../utils/invitations';
 
 interface UserProfile {
   id: string;
@@ -177,7 +178,7 @@ export function AddEditUserModal({ user, roles, teams, organizationId, onClose, 
           throw inviteError;
         }
 
-        const invitationLink = `${window.location.origin}/accept-invitation?token=${invitationData.token}`;
+        const invitationLink = buildInvitationLink(invitationData.token);
 
         await supabase.from('email_queue').insert({
           organization_id: formData.organization_id || null,

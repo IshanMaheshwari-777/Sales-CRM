@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
-import { UserPlus, AlertCircle } from 'lucide-react';
+import { UserPlus, AlertCircle, LogOut } from 'lucide-react';
 
 interface Invitation {
   id: string;
@@ -26,7 +26,7 @@ export function InvitationAcceptance() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const { signUp } = useAuth();
+  const { user, signUp, signOut } = useAuth();
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -111,6 +111,11 @@ export function InvitationAcceptance() {
     e.preventDefault();
     setError('');
 
+    if (user) {
+      setError('Please sign out of the current account before accepting this invitation.');
+      return;
+    }
+
     if (!firstName.trim() || !lastName.trim()) {
       setError('First and last names are required');
       return;
@@ -176,9 +181,13 @@ export function InvitationAcceptance() {
       // Add user to organization members
       const { error: memberError } = await supabase
         .from('organization_members')
-        .insert({
+        .upsert({
           organization_id: invitation.organization_id,
-          profile_id: authData.user.id
+          profile_id: authData.user.id,
+          role_id: invitation.role_id,
+          joined_at: new Date().toISOString(),
+        }, {
+          onConflict: 'profile_id'
         });
 
       if (memberError) {
@@ -207,6 +216,11 @@ export function InvitationAcceptance() {
       setError(err.message || 'Failed to accept invitation');
       setSubmitting(false);
     }
+  };
+
+  const handleSignOut = async () => {
+    setError('');
+    await signOut();
   };
 
   if (loading) {
@@ -259,6 +273,25 @@ export function InvitationAcceptance() {
           You've been invited to join as a <span className="font-semibold text-orange-600">{invitation?.roles?.role_name || 'team member'}</span>
         </p>
 
+        {user && (
+          <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4">
+            <p className="text-sm font-semibold text-amber-900">
+              You are currently signed in as {user.email}.
+            </p>
+            <p className="mt-1 text-sm text-amber-800">
+              Sign out first, then accept this invitation with {invitation?.email}.
+            </p>
+            <button
+              type="button"
+              onClick={handleSignOut}
+              className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-amber-600 px-4 py-3 font-semibold text-white transition hover:bg-amber-700"
+            >
+              <LogOut className="h-4 w-4" />
+              Sign Out to Continue
+            </button>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-5">
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -269,11 +302,12 @@ export function InvitationAcceptance() {
                 id="firstName"
                 type="text"
                 value={firstName}
-                onChange={(e) => setFirstName(e.target.value)}
-                className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none transition"
-                placeholder="John"
-                required
-              />
+              onChange={(e) => setFirstName(e.target.value)}
+              className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none transition"
+              placeholder="John"
+              required
+              disabled={!!user}
+            />
             </div>
             <div>
               <label htmlFor="lastName" className="block text-sm font-medium text-slate-700 mb-2">
@@ -283,11 +317,12 @@ export function InvitationAcceptance() {
                 id="lastName"
                 type="text"
                 value={lastName}
-                onChange={(e) => setLastName(e.target.value)}
-                className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none transition"
-                placeholder="Doe"
-                required
-              />
+              onChange={(e) => setLastName(e.target.value)}
+              className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none transition"
+              placeholder="Doe"
+              required
+              disabled={!!user}
+            />
             </div>
           </div>
 
@@ -315,6 +350,7 @@ export function InvitationAcceptance() {
               onChange={(e) => setMobileNumber(e.target.value)}
               className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none transition"
               placeholder="+1 234 567 8900"
+              disabled={!!user}
             />
           </div>
 
@@ -331,6 +367,7 @@ export function InvitationAcceptance() {
               placeholder="••••••••"
               required
               minLength={6}
+              disabled={!!user}
             />
           </div>
 
@@ -347,6 +384,7 @@ export function InvitationAcceptance() {
               placeholder="••••••••"
               required
               minLength={6}
+              disabled={!!user}
             />
           </div>
 
@@ -358,10 +396,10 @@ export function InvitationAcceptance() {
 
           <button
             type="submit"
-            disabled={submitting}
+            disabled={submitting || !!user}
             className="w-full bg-orange-500 text-white py-3 rounded-lg font-semibold hover:bg-orange-600 transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {submitting ? 'Creating Account...' : 'Accept Invitation'}
+            {user ? 'Sign Out to Accept Invitation' : submitting ? 'Creating Account...' : 'Accept Invitation'}
           </button>
         </form>
 

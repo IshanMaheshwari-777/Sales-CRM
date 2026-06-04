@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import { isIgnorableRequestError } from './requestErrors';
 
 export interface TemplateVariable {
   key: string;
@@ -36,22 +37,29 @@ export interface TemplateData {
 }
 
 export async function fetchTemplateData(leadId: string, userId: string): Promise<TemplateData | null> {
+  const controller = new AbortController();
+
   try {
     const [leadResult, counselorResult] = await Promise.all([
       supabase
         .from('leads')
         .select('first_name, last_name, name, mobile_number, email, university, course')
+        .abortSignal(controller.signal)
         .eq('id', leadId)
         .maybeSingle(),
       supabase
         .from('profiles')
         .select('full_name, email, mobile_number')
+        .abortSignal(controller.signal)
         .eq('id', userId)
         .maybeSingle()
     ]);
 
     if (leadResult.error || counselorResult.error || !leadResult.data || !counselorResult.data) {
-      console.error('Error fetching template data:', leadResult.error || counselorResult.error);
+      const relevantError = leadResult.error || counselorResult.error;
+      if (relevantError && !isIgnorableRequestError(relevantError)) {
+        console.error('Error fetching template data:', relevantError);
+      }
       return null;
     }
 
@@ -82,8 +90,12 @@ export async function fetchTemplateData(leadId: string, userId: string): Promise
       course: lead.course || '',
     };
   } catch (error) {
-    console.error('Error in fetchTemplateData:', error);
+    if (!isIgnorableRequestError(error)) {
+      console.error('Error in fetchTemplateData:', error);
+    }
     return null;
+  } finally {
+    controller.abort();
   }
 }
 

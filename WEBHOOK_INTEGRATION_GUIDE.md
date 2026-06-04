@@ -2,8 +2,8 @@
 
 ## Overview
 
-This CRM system provides a comprehensive webhook integration system that allows you to:
-- Receive leads from external sources via incoming webhooks
+This CRM system provides a webhook integration system that allows you to:
+- Receive leads from external sources via one canonical incoming webhook contract
 - Push lead data to external systems via outgoing webhooks
 - Integrate with Slack for real-time notifications
 - Track webhook activity and monitor health
@@ -13,7 +13,7 @@ This CRM system provides a comprehensive webhook integration system that allows 
 1. [Incoming Webhooks](#incoming-webhooks)
 2. [Outgoing Webhooks](#outgoing-webhooks)
 3. [Slack Integration](#slack-integration)
-4. [Lead Source Configuration](#lead-source-configuration)
+4. [Lead Source Usage](#lead-source-usage)
 5. [Security](#security)
 6. [Monitoring & Logs](#monitoring--logs)
 7. [Troubleshooting](#troubleshooting)
@@ -26,13 +26,12 @@ This CRM system provides a comprehensive webhook integration system that allows 
 
 1. Navigate to **Settings → Webhook Integrations → Incoming Webhooks**
 2. Click **Add Configuration** to create a new webhook configuration
-3. Provide a descriptive name (e.g., "Facebook Ads Webhook")
+3. Provide a descriptive name (e.g., "Pabbly Lead Import")
 4. Set your desired rate limit (default: 60 requests/minute)
 5. Save the configuration
 
 After creation, you'll receive:
-- **API Key**: Used to identify your organization
-- **HMAC Secret**: Used to sign requests for security
+- **API Key**: Used to identify and authorize your organization
 - **Webhook URL**: The endpoint to send leads to
 
 ### Webhook Endpoint
@@ -45,8 +44,6 @@ POST {SUPABASE_URL}/functions/v1/webhook-inbound
 
 ```
 X-API-Key: your_api_key
-X-Webhook-Signature: hmac_sha256_signature
-X-Webhook-Timestamp: unix_timestamp
 Content-Type: application/json
 ```
 
@@ -54,88 +51,60 @@ Content-Type: application/json
 
 ```json
 {
-  "source": "Facebook Lead Ads",
+  "source": "Facebook Ads",
   "lead": {
-    "first_name": "John",
-    "last_name": "Doe",
-    "email": "john.doe@example.com",
+    "full_name": "John Doe",
     "mobile_number": "+1234567890",
+    "email": "john.doe@example.com",
     "company": "Acme Corp",
-    "course": "MBA",
-    "specialization": "Marketing",
     "city": "New York",
     "state": "NY",
     "country": "USA",
+    "course": "MBA",
+    "specialization": "Marketing",
     "campaign_name": "Fall 2024 Campaign",
     "campaign_id": "123456",
-    "adgroup_id": "789012"
+    "adgroup_id": "789012",
+    "keyword": "mba admissions"
   }
 }
 ```
 
-### HMAC Signature Generation
+### Required Lead Fields
 
-The HMAC signature ensures request authenticity. Generate it as follows:
+- `source`
+- `lead.full_name`
+- `lead.mobile_number`
+- `lead.email`
 
-**JavaScript/Node.js:**
-```javascript
-const crypto = require('crypto');
+`mobile_number` is the strongest duplicate identifier in the CRM because the database enforces uniqueness there. Email is also checked during webhook ingestion to catch duplicate leads before insert.
 
-function generateHmacSignature(secret, timestamp, payload) {
-  const data = `${timestamp}.${JSON.stringify(payload)}`;
-  return crypto
-    .createHmac('sha256', secret)
-    .update(data)
-    .digest('hex');
-}
+### Canonical Field Rules
 
-// Usage
-const timestamp = Math.floor(Date.now() / 1000).toString();
-const payload = { source: "...", lead: {...} };
-const signature = generateHmacSignature(hmacSecret, timestamp, payload);
-```
+- The incoming payload shape is the same for every lead source
+- `source` is still required, but it is only used for attribution/reporting and channel labeling
+- Source does **not** change expected field names anymore
+- New leads go through the assignment rule engine first, then fallback round-robin if no rule matches
+- Duplicate leads are updated in place and keep their current assignee
 
-**Python:**
-```python
-import hmac
-import hashlib
-import json
-import time
+### cURL Example
 
-def generate_hmac_signature(secret, timestamp, payload):
-    data = f"{timestamp}.{json.dumps(payload)}"
-    return hmac.new(
-        secret.encode('utf-8'),
-        data.encode('utf-8'),
-        hashlib.sha256
-    ).hexdigest()
-
-# Usage
-timestamp = str(int(time.time()))
-payload = {"source": "...", "lead": {...}}
-signature = generate_hmac_signature(hmac_secret, timestamp, payload)
-```
-
-**cURL Example:**
 ```bash
-TIMESTAMP=$(date +%s)
-PAYLOAD='{"source":"Website","lead":{"name":"John Doe","email":"john@example.com"}}'
-SIGNATURE=$(echo -n "${TIMESTAMP}.${PAYLOAD}" | openssl dgst -sha256 -hmac "YOUR_HMAC_SECRET" | sed 's/^.* //')
+PAYLOAD='{"source":"Website Contact Form","lead":{"full_name":"John Doe","mobile_number":"+919999999999","email":"john@example.com","city":"Pune","state":"Maharashtra","country":"India","company":"Acme","course":"MBA","specialization":"Marketing"}}'
 
 curl -X POST https://your-project.supabase.co/functions/v1/webhook-inbound \
   -H "Content-Type: application/json" \
   -H "X-API-Key: YOUR_API_KEY" \
-  -H "X-Webhook-Signature: $SIGNATURE" \
-  -H "X-Webhook-Timestamp: $TIMESTAMP" \
   -d "$PAYLOAD"
 ```
 
 ### Response Codes
 
 - **201 Created**: Lead created successfully
-- **200 OK**: Duplicate lead detected (skipped)
-- **401 Unauthorized**: Invalid API key or HMAC signature
+- **200 OK**: Duplicate lead updated in place
+- **401 Unauthorized**: Invalid API key
 - **429 Too Many Requests**: Rate limit exceeded
+- **400 Bad Request**: Missing required canonical fields
 - **500 Internal Server Error**: Server error
 
 ### Response Format
@@ -154,9 +123,9 @@ curl -X POST https://your-project.supabase.co/functions/v1/webhook-inbound \
 ```json
 {
   "success": true,
-  "message": "Duplicate lead detected",
+  "message": "Existing lead updated successfully",
   "lead_id": "existing-uuid",
-  "action": "skipped"
+  "action": "updated"
 }
 ```
 
@@ -164,7 +133,7 @@ curl -X POST https://your-project.supabase.co/functions/v1/webhook-inbound \
 ```json
 {
   "success": false,
-  "error": "Invalid HMAC signature"
+  "error": "Missing required field: lead.mobile_number"
 }
 ```
 
@@ -271,53 +240,26 @@ New leads are sent to Slack with rich formatting including:
 
 ---
 
-## Lead Source Configuration
+## Lead Source Usage
 
-### Preset Templates
+Use `source` as a plain attribution label such as:
+- `Facebook Ads`
+- `Landing Page`
+- `Pabbly`
+- `Google Ads`
 
-The system includes pre-configured templates for popular lead sources:
-- Facebook Lead Ads
-- Google Ads
-- Website Contact Forms
-- LinkedIn Lead Gen
-- HubSpot
-- Zoho CRM
-
-### Field Mapping
-
-Each source template defines how incoming fields map to your CRM schema:
-
-```json
-{
-  "name": "full_name",
-  "first_name": "first_name",
-  "last_name": "last_name",
-  "email": "email",
-  "mobile_number": "phone_number",
-  "company": "company_name"
-}
-```
-
-**Left side**: Your CRM field name
-**Right side**: Incoming webhook field name
-
-### Creating Custom Sources
-
-1. Navigate to **Settings → Webhook Integrations → Lead Sources**
-2. Create a new source or edit existing
-3. Define field mappings for your specific needs
+That value is stored on the lead as the channel/source label, but it no longer changes the request schema.
 
 ---
 
 ## Security
 
-### HMAC Signature Verification
+### Organization API Key
 
-All incoming webhooks **must** include a valid HMAC signature:
-- Signature is computed over `timestamp.payload`
-- Uses SHA-256 algorithm
-- Prevents replay attacks (timestamps expire after 5 minutes)
-- Constant-time comparison prevents timing attacks
+All incoming webhooks must include a valid organization API key:
+- `X-API-Key` identifies the tenant and authorizes the request
+- Each webhook configuration has its own key
+- Keys can be rotated by creating a new configuration and disabling the old one
 
 ### IP Whitelisting (Optional)
 
@@ -330,7 +272,7 @@ You can restrict webhook access to specific IP addresses:
 
 To rotate your API keys:
 1. Create a new webhook configuration
-2. Update external systems to use new credentials
+2. Update external systems to use the new API key
 3. Delete old configuration after migration
 
 ### Rate Limiting
@@ -375,26 +317,19 @@ Configure alerts for:
 - Check that the configuration is enabled
 - Ensure API key matches your organization
 
-**401 Unauthorized - Invalid HMAC Signature**
-- Verify HMAC secret is correct
-- Check signature generation algorithm
-- Ensure timestamp is current (within 5 minutes)
-- Verify payload is not modified after signing
-
-**401 Unauthorized - Invalid or Expired Timestamp**
-- Ensure system clocks are synchronized
-- Timestamp must be within 5 minutes of current time
-- Use Unix timestamp in seconds (not milliseconds)
+**400 Bad Request - Missing Required Field**
+- Verify `source`, `lead.full_name`, `lead.mobile_number`, and `lead.email` are present
+- Check that the payload uses the canonical field names
 
 **429 Too Many Requests**
 - You've exceeded the rate limit
 - Wait before sending more requests
 - Consider increasing rate limit in configuration
 
-**Duplicate Lead Detected**
-- Lead with same email or phone already exists
-- This is expected behavior to prevent duplicates
-- Returns existing lead ID in response
+**Existing Lead Updated Successfully**
+- Lead with same mobile number or email already exists
+- This is expected behavior for duplicate webhook submissions
+- Returns the existing lead ID with `action: updated`
 
 **Lead Not Assigned to Counselor**
 - Check assignment rules are configured
@@ -430,16 +365,16 @@ For additional help:
 
 ## Best Practices
 
-1. **Always verify HMAC signatures** on incoming webhooks
-2. **Handle duplicate leads gracefully** in your integration
-3. **Implement idempotency** in your webhook receivers
+1. **Use the canonical payload** for every source
+2. **Send all three mandatory lead fields** every time
+3. **Handle duplicate updates gracefully** in your upstream integration
 4. **Monitor webhook health** regularly
 5. **Set appropriate rate limits** based on your traffic
 6. **Use retry logic** for outbound webhooks
 7. **Log all webhook activity** for troubleshooting
-8. **Rotate credentials** periodically for security
+8. **Rotate API keys** periodically for security
 9. **Test thoroughly** before going live
-10. **Keep field mappings** up to date with your sources
+10. **Keep `source` values consistent** for reporting
 
 ---
 
@@ -451,9 +386,8 @@ For additional help:
 
 ## Change Log
 
-- **2024-04-05**: Initial webhook system implementation
-  - HMAC-secured incoming webhooks
-  - Outbound webhook delivery with retry logic
-  - Slack integration
-  - Lead source templates
-  - Activity logging and monitoring
+- **2026-04-18**: Simplified inbound webhook contract
+  - Canonical payload for all sources
+  - Single `X-API-Key` auth model
+  - Duplicate webhook leads update existing records
+  - `source` retained only for attribution/reporting

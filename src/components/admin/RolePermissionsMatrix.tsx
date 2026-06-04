@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Check } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { isIgnorableRequestError } from '../../lib/requestErrors';
 
 interface Role {
   id: string;
@@ -34,7 +35,9 @@ export function RolePermissionsMatrix() {
   const [updating, setUpdating] = useState(false);
 
   useEffect(() => {
-    loadData();
+    const controller = new AbortController();
+    loadData(controller.signal);
+    return () => controller.abort();
   }, []);
 
   useEffect(() => {
@@ -48,14 +51,14 @@ export function RolePermissionsMatrix() {
     setGroupedPermissions(grouped);
   }, [permissions]);
 
-  const loadData = async () => {
+  const loadData = async (signal?: AbortSignal) => {
     try {
       setLoading(true);
 
       const [rolesRes, permsRes, rolePermsRes] = await Promise.all([
-        supabase.from('roles').select('*').order('hierarchy_level'),
-        supabase.from('permissions').select('*').order('module_name, action_name'),
-        supabase.from('role_permissions').select('role_id, permission_id'),
+        supabase.from('roles').select('*').order('hierarchy_level').abortSignal(signal ?? new AbortController().signal),
+        supabase.from('permissions').select('*').order('module_name, action_name').abortSignal(signal ?? new AbortController().signal),
+        supabase.from('role_permissions').select('role_id, permission_id').abortSignal(signal ?? new AbortController().signal),
       ]);
 
       if (rolesRes.error) throw rolesRes.error;
@@ -66,7 +69,9 @@ export function RolePermissionsMatrix() {
       setPermissions(permsRes.data || []);
       setRolePermissions(rolePermsRes.data || []);
     } catch (error) {
-      console.error('Error loading permissions data:', error);
+      if (!isIgnorableRequestError(error)) {
+        console.error('Error loading permissions data:', error);
+      }
     } finally {
       setLoading(false);
     }

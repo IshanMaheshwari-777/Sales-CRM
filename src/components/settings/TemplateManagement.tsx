@@ -27,6 +27,26 @@ interface TemplateManagementProps {
   templateType: 'email' | 'whatsapp';
 }
 
+function mapTemplateRow(template: any): Template {
+  return {
+    id: template.id,
+    template_name: template.template_name,
+    template_type: template.template_type,
+    subject: template.subject,
+    body_content: template.body_content,
+    is_approved: template.is_approved,
+    is_active: template.is_active,
+    is_draft: template.is_draft,
+    created_by: template.created_by,
+    created_at: template.created_at,
+    approved_at: template.approved_at,
+    creator_name: template.profiles?.full_name || 'Unknown',
+    assigned_user_count: template.message_template_users?.length || 0,
+    usage_count: 0,
+    assigned_users: (template.message_template_users || []).map((u: any) => u.user_id),
+  };
+}
+
 export function TemplateManagement({ templateType }: TemplateManagementProps) {
   const { user } = useAuth();
   const { hasPermission, isAdmin, loading: permissionsLoading } = usePermissions();
@@ -107,34 +127,7 @@ export function TemplateManagement({ templateType }: TemplateManagementProps) {
 
       if (error) throw error;
 
-      const templatesWithCounts = await Promise.all(
-        (data || []).map(async (template: any) => {
-          const { count } = await supabase
-            .from('message_template_usage_log')
-            .select('*', { count: 'exact', head: true })
-            .eq('template_id', template.id);
-
-          return {
-            id: template.id,
-            template_name: template.template_name,
-            template_type: template.template_type,
-            subject: template.subject,
-            body_content: template.body_content,
-            is_approved: template.is_approved,
-            is_active: template.is_active,
-            is_draft: template.is_draft,
-            created_by: template.created_by,
-            created_at: template.created_at,
-            approved_at: template.approved_at,
-            creator_name: template.profiles?.full_name || 'Unknown',
-            assigned_user_count: template.message_template_users?.length || 0,
-            usage_count: count || 0,
-            assigned_users: (template.message_template_users || []).map((u: any) => u.user_id),
-          };
-        })
-      );
-
-      setTemplates(templatesWithCounts);
+      setTemplates((data || []).map(mapTemplateRow));
     } catch (error) {
       console.error('Error fetching templates:', error);
     } finally {
@@ -522,7 +515,11 @@ export function TemplateManagement({ templateType }: TemplateManagementProps) {
           setShowAddModal(false);
           setEditingTemplate(null);
         }}
-        onSuccess={fetchTemplates}
+        onSuccess={async () => {
+          setShowAddModal(false);
+          setEditingTemplate(null);
+          await fetchTemplates();
+        }}
         editingTemplate={editingTemplate}
       />
     </div>

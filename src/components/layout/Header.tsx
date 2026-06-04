@@ -15,7 +15,7 @@ interface HeaderProps {
 }
 
 export function Header({ onAddLead, searchQuery, onSearchChange, onSearch, onClearSearch }: HeaderProps) {
-  const { profile, signOut } = useAuth();
+  const { profile, organizationMember, signOut } = useAuth();
   const { userProfile, isSuperAdmin } = usePermissions();
   const { formattedTime, endSession } = useTimer(profile?.id);
   const [showUserMenu, setShowUserMenu] = useState(false);
@@ -24,10 +24,25 @@ export function Header({ onAddLead, searchQuery, onSearchChange, onSearch, onCle
   const roleName = userProfile?.role?.role_name || profile?.role?.replace('_', ' ') || 'User';
 
   useEffect(() => {
+    if (isSuperAdmin && profile?.organization_id) {
+      setCurrentOrgId(profile.organization_id);
+      return;
+    }
+
+    if (organizationMember?.organization_id) {
+      setCurrentOrgId(organizationMember.organization_id);
+      return;
+    }
+
+    if (profile?.organization_id) {
+      setCurrentOrgId(profile.organization_id);
+      return;
+    }
+
     if (userProfile?.id) {
       loadCurrentOrganization();
     }
-  }, [userProfile?.id]);
+  }, [isSuperAdmin, profile?.organization_id, organizationMember?.organization_id, userProfile?.id]);
 
   const loadCurrentOrganization = async () => {
     try {
@@ -74,6 +89,7 @@ export function Header({ onAddLead, searchQuery, onSearchChange, onSearch, onCle
         <div className="relative flex-1 max-w-xl">
           <div className="flex items-center gap-2 bg-slate-600 rounded-lg px-4 py-2">
             <input
+              data-testid="header-search-input"
               type="text"
               value={searchQuery}
               onChange={(e) => onSearchChange(e.target.value)}
@@ -84,6 +100,7 @@ export function Header({ onAddLead, searchQuery, onSearchChange, onSearch, onCle
             {searchQuery && (
               <button
                 onClick={onClearSearch}
+                data-testid="header-search-clear"
                 className="p-1 hover:bg-slate-500 rounded transition"
                 title="Clear search"
               >
@@ -92,6 +109,7 @@ export function Header({ onAddLead, searchQuery, onSearchChange, onSearch, onCle
             )}
             <button
               onClick={onSearch}
+              data-testid="header-search-submit"
               className="p-1 hover:bg-slate-500 rounded transition"
               title="Search"
             >
@@ -111,6 +129,7 @@ export function Header({ onAddLead, searchQuery, onSearchChange, onSearch, onCle
 
         <button
           onClick={onAddLead}
+          data-testid="header-add-lead-button"
           className="p-2 hover:bg-slate-600 rounded-lg transition"
           title="Add New Lead"
         >
@@ -129,6 +148,7 @@ export function Header({ onAddLead, searchQuery, onSearchChange, onSearch, onCle
         <div className="relative">
           <button
             onClick={() => setShowUserMenu(!showUserMenu)}
+            data-testid="header-user-menu-toggle"
             className="flex items-center gap-2 p-2 hover:bg-slate-600 rounded-lg transition"
           >
             <div className="w-8 h-8 bg-slate-500 rounded-full flex items-center justify-center">
@@ -149,6 +169,7 @@ export function Header({ onAddLead, searchQuery, onSearchChange, onSearch, onCle
                   await endSession();
                   signOut();
                 }}
+                data-testid="header-sign-out-button"
                 className="w-full flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 transition"
               >
                 <LogOut className="w-4 h-4" />

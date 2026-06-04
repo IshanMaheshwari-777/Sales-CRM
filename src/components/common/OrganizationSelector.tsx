@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Building2 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { usePermissions } from '../../contexts/PermissionsContext';
+import { isIgnorableRequestError } from '../../lib/requestErrors';
 
 interface Organization {
   id: string;
@@ -31,29 +32,36 @@ export function OrganizationSelector({
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    loadOrganizations();
+    const controller = new AbortController();
+    loadOrganizations(controller.signal);
+    return () => controller.abort();
   }, []);
 
-  async function loadOrganizations() {
+  async function loadOrganizations(signal?: AbortSignal) {
     try {
       setLoading(true);
+      setOrganizations([]);
 
       const { data, error: fetchError } = await supabase
-        .from('organizations')
-        .select('id, name, status')
-        .eq('status', 'active')
-        .order('name');
+        .rpc('get_accessible_organizations')
+        .abortSignal(signal ?? new AbortController().signal);
 
       if (fetchError) throw fetchError;
 
-      setOrganizations(data || []);
+      setOrganizations((data || []).map((org: any) => ({
+        id: org.id,
+        name: org.name,
+        status: org.status,
+      })));
 
       // Auto-select organization for non-super admins
       if (!isSuperAdmin && userProfile?.organization_id && !value) {
         onChange(userProfile.organization_id);
       }
     } catch (error) {
-      console.error('Error loading organizations:', error);
+      if (!isIgnorableRequestError(error)) {
+        console.error('Error loading organizations:', error);
+      }
     } finally {
       setLoading(false);
     }

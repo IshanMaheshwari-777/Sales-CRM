@@ -1,69 +1,37 @@
-import { View, Text, FlatList, TouchableOpacity, RefreshControl, Alert } from 'react-native';
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import {
+  Alert,
+  FlatList,
+  Linking,
+  RefreshControl,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { useRouter } from 'expo-router';
-import { Calendar, Clock, CircleCheck as CheckCircle2, Circle } from 'lucide-react-native';
+import { CheckCircle2, Circle, Phone } from '../../mobile/components/icons';
+import { EmptyState, ToneDot } from '../../mobile/components/design';
 import { useAuth } from '../../mobile/contexts/AuthContext';
-import { supabase } from '../../src/lib/supabase';
-
-interface Followup {
-  id: string;
-  title: string;
-  description: string;
-  scheduled_at: string;
-  status: string;
-  lead_id: string;
-  lead: {
-    name: string;
-    phone: string;
-  };
-}
+import { useMobilePreferences } from '../../mobile/contexts/MobilePreferencesContext';
+import { getFollowups, markFollowupComplete } from '../../mobile/lib/leadQueue';
+import type { FollowupItem } from '../../mobile/lib/types';
 
 export default function FollowupsScreen() {
   const { profile } = useAuth();
+  const { theme, preferences } = useMobilePreferences();
   const router = useRouter();
-  const [followups, setFollowups] = useState<Followup[]>([]);
-  const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<'all' | 'today' | 'pending'>('pending');
+  const [followups, setFollowups] = useState<FollowupItem[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
 
   const loadFollowups = async () => {
     if (!profile?.organization_id) return;
-
     try {
-      let query = supabase
-        .from('followups')
-        .select(`
-          id,
-          title,
-          description,
-          scheduled_at,
-          status,
-          lead_id,
-          lead:leads(name, phone)
-        `)
-        .eq('organization_id', profile.organization_id)
-        .order('scheduled_at', { ascending: true });
-
-      if (filter === 'pending') {
-        query = query.eq('status', 'pending');
-      } else if (filter === 'today') {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const tomorrow = new Date(today);
-        tomorrow.setDate(tomorrow.getDate() + 1);
-
-        query = query
-          .eq('status', 'pending')
-          .gte('scheduled_at', today.toISOString())
-          .lt('scheduled_at', tomorrow.toISOString());
-      }
-
-      const { data, error } = await query;
-
-      if (error) throw error;
-      setFollowups(data || []);
+      const data = await getFollowups(profile.organization_id, filter);
+      setFollowups(data);
     } catch (error) {
-      console.error('Error loading followups:', error);
-      Alert.alert('Error', 'Failed to load follow-ups');
+      console.error('Error loading follow-ups:', error);
+      Alert.alert('Unable to load follow-ups', 'Please try again in a moment.');
     } finally {
       setRefreshing(false);
     }
@@ -71,158 +39,214 @@ export default function FollowupsScreen() {
 
   useEffect(() => {
     loadFollowups();
-  }, [profile?.organization_id, filter]);
+  }, [filter, profile?.organization_id]);
 
   const onRefresh = () => {
     setRefreshing(true);
     loadFollowups();
   };
 
-  const handleMarkComplete = async (id: string) => {
+  const handleMarkComplete = async (followupId: string) => {
     try {
-      const { error } = await supabase
-        .from('followups')
-        .update({ status: 'completed' })
-        .eq('id', id);
-
-      if (error) throw error;
-      loadFollowups();
-      Alert.alert('Success', 'Follow-up marked as complete');
+      await markFollowupComplete(followupId);
+      await loadFollowups();
     } catch (error) {
-      Alert.alert('Error', 'Failed to update follow-up');
+      console.error('Error marking follow-up complete:', error);
+      Alert.alert('Could not update', 'The follow-up could not be marked complete.');
     }
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffDays = Math.floor((date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-
-    if (diffDays === 0) return 'Today';
-    if (diffDays === 1) return 'Tomorrow';
-    if (diffDays === -1) return 'Yesterday';
-    if (diffDays < -1) return `${Math.abs(diffDays)} days ago`;
-
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  };
-
-  const formatTime = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-  };
-
-  const isOverdue = (dateString: string) => {
-    return new Date(dateString) < new Date();
-  };
-
-  const renderFollowup = ({ item }: { item: Followup }) => {
-    const overdue = isOverdue(item.scheduled_at) && item.status === 'pending';
+  const renderFollowup = ({ item }: { item: FollowupItem }) => {
+    const dueDate = new Date(`${item.next_action_date}T${item.next_action_time}`);
+    const overdue = item.status === 'pending' && dueDate.getTime() < Date.now();
+    const leadName = item.lead?.name || 'Lead follow-up';
 
     return (
       <TouchableOpacity
-        className={`bg-white rounded-xl p-4 mb-3 shadow-sm border ${
-          overdue ? 'border-red-200' : 'border-gray-100'
-        }`}
+        style={{
+          marginBottom: 12,
+          borderRadius: 14,
+          backgroundColor: theme.surface,
+          borderWidth: 1,
+          borderColor: overdue ? theme.dangerSoft : theme.border,
+          padding: 12,
+          overflow: 'hidden',
+        }}
         onPress={() => router.push(`/lead/${item.lead_id}`)}
       >
-        <View className="flex-row justify-between items-start mb-2">
-          <View className="flex-1">
-            <Text className="text-lg font-semibold text-gray-900 mb-1">{item.title}</Text>
-            <Text className="text-sm text-gray-600 mb-2">{item.lead?.name}</Text>
+        {overdue ? <View style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, backgroundColor: theme.danger }} /> : null}
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
+          <View style={{ flex: 1 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 3 }}>
+              <Text style={{ color: theme.text, fontSize: 14.5, fontWeight: '800', flex: 1 }} numberOfLines={1}>
+                {leadName}
+              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <ToneDot color={overdue ? theme.danger : theme.accent} size={5} />
+                <Text style={{ color: overdue ? theme.danger : theme.accent, fontSize: 10.5, fontWeight: '800' }}>
+                  {overdue ? 'Overdue' : item.status}
+                </Text>
+              </View>
+            </View>
+            <Text style={{ color: theme.textDim, fontSize: 12.5, lineHeight: 18, marginBottom: 6 }}>
+              {item.followup_remarks || 'Follow up with this lead.'}
+            </Text>
+            <Text style={{ color: overdue ? theme.danger : theme.textDim, fontSize: 11.5, fontWeight: '800' }}>
+              {item.next_action_date} · {item.next_action_time}
+            </Text>
           </View>
+          <TouchableOpacity
+            style={{
+              width: 34,
+              height: 34,
+              borderRadius: 17,
+              backgroundColor: theme.accent,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+            onPress={(event) => {
+              event.stopPropagation();
+              if (item.lead?.mobile_number) {
+                Linking.openURL(`tel:${item.lead.mobile_number}`);
+              }
+            }}
+          >
+            <Phone size={13} color={theme.onAccent} />
+          </TouchableOpacity>
           {item.status === 'pending' ? (
             <TouchableOpacity
-              className="bg-green-50 p-2 rounded-full"
-              onPress={() => handleMarkComplete(item.id)}
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: 14,
+                backgroundColor: 'transparent',
+                borderWidth: 1.5,
+                borderColor: theme.border,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+              onPress={(event) => {
+                event.stopPropagation();
+                handleMarkComplete(item.id);
+              }}
             >
-              <Circle size={20} color="#16a34a" />
+              <Circle size={12} color={theme.textMute} />
             </TouchableOpacity>
           ) : (
-            <View className="bg-green-100 p-2 rounded-full">
-              <CheckCircle2 size={20} color="#16a34a" />
+            <View
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: 14,
+                backgroundColor: theme.successSoft,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <CheckCircle2 size={12} color={theme.success} />
             </View>
           )}
-        </View>
-
-        {item.description && (
-          <Text className="text-sm text-gray-600 mb-3">{item.description}</Text>
-        )}
-
-        <View className="flex-row items-center">
-          <View className={`flex-row items-center px-3 py-1 rounded-full ${
-            overdue ? 'bg-red-100' : 'bg-blue-100'
-          }`}>
-            <Calendar size={14} color={overdue ? '#dc2626' : '#2563eb'} />
-            <Text className={`ml-1 text-xs font-medium ${
-              overdue ? 'text-red-700' : 'text-blue-700'
-            }`}>
-              {formatDate(item.scheduled_at)}
-            </Text>
-          </View>
-          <View className="flex-row items-center ml-2 px-3 py-1 rounded-full bg-gray-100">
-            <Clock size={14} color="#6b7280" />
-            <Text className="ml-1 text-xs font-medium text-gray-700">
-              {formatTime(item.scheduled_at)}
-            </Text>
-          </View>
         </View>
       </TouchableOpacity>
     );
   };
 
+  const overdueCount = followups.filter((item) => {
+    const dueDate = new Date(`${item.next_action_date}T${item.next_action_time}`);
+    return item.status === 'pending' && dueDate.getTime() < Date.now();
+  }).length;
+
   return (
-    <View className="flex-1 bg-gray-50">
-      <View className="bg-white px-4 py-3 border-b border-gray-200">
-        <View className="flex-row space-x-2">
-          <TouchableOpacity
-            className={`flex-1 py-2 rounded-lg ${
-              filter === 'pending' ? 'bg-blue-600' : 'bg-gray-100'
-            }`}
-            onPress={() => setFilter('pending')}
-          >
-            <Text className={`text-center font-medium ${
-              filter === 'pending' ? 'text-white' : 'text-gray-700'
-            }`}>
-              Pending
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            className={`flex-1 py-2 rounded-lg ${
-              filter === 'today' ? 'bg-blue-600' : 'bg-gray-100'
-            }`}
-            onPress={() => setFilter('today')}
-          >
-            <Text className={`text-center font-medium ${
-              filter === 'today' ? 'text-white' : 'text-gray-700'
-            }`}>
-              Today
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            className={`flex-1 py-2 rounded-lg ${
-              filter === 'all' ? 'bg-blue-600' : 'bg-gray-100'
-            }`}
-            onPress={() => setFilter('all')}
-          >
-            <Text className={`text-center font-medium ${
-              filter === 'all' ? 'text-white' : 'text-gray-700'
-            }`}>
-              All
-            </Text>
-          </TouchableOpacity>
+    <View style={{ flex: 1, backgroundColor: theme.bg }}>
+      <View style={{ paddingHorizontal: 16, paddingTop: 14, paddingBottom: 10 }}>
+        <Text style={{ color: theme.text, fontSize: 22, fontWeight: '800', letterSpacing: -0.4 }}>Follow-ups</Text>
+        <Text style={{ color: theme.textDim, fontSize: 12, marginTop: 3 }}>
+          {followups.length} open · <Text style={{ color: theme.danger, fontWeight: '800' }}>{overdueCount} overdue</Text>
+        </Text>
+
+        <View
+          style={{
+            flexDirection: 'row',
+            gap: 8,
+            marginTop: 14,
+            backgroundColor: theme.surface,
+            borderRadius: 18,
+            borderWidth: 1,
+            borderColor: theme.border,
+            padding: 4,
+          }}
+        >
+          {(['today', 'pending', 'all'] as const).map((tab) => (
+            <TouchableOpacity
+              key={tab}
+              style={{
+                flex: 1,
+                borderRadius: 14,
+                paddingVertical: 11,
+                backgroundColor: filter === tab ? theme.accent : 'transparent',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexDirection: 'row',
+              }}
+              onPress={() => setFilter(tab)}
+            >
+              <Text style={{ color: filter === tab ? theme.onAccent : theme.textDim, fontWeight: '900', fontSize: 13 }}>
+                {tab === 'pending' ? 'Pending' : tab === 'today' ? 'Today' : 'All'}
+              </Text>
+              <View
+                style={{
+                  borderRadius: 6,
+                  paddingHorizontal: 6,
+                  paddingVertical: 1,
+                  backgroundColor: filter === tab ? 'rgba(0,0,0,0.15)' : theme.surface2,
+                  marginLeft: 6,
+                }}
+              >
+                <Text style={{ color: filter === tab ? theme.onAccent : theme.textMute, fontSize: 10, fontWeight: '800' }}>
+                  {tab === 'all' ? followups.length : followups.filter((item) => {
+                    const dueDate = new Date(`${item.next_action_date}T${item.next_action_time}`);
+                    if (tab === 'today') return dueDate.toDateString() === new Date().toDateString();
+                    return item.status === 'pending';
+                  }).length}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          ))}
         </View>
       </View>
+
+      {filter === 'today' && overdueCount > 0 ? (
+        <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
+          <View
+            style={{
+              backgroundColor: theme.dangerSoft,
+              borderWidth: 1,
+              borderColor: theme.dangerSoft,
+              borderRadius: 12,
+              paddingVertical: 10,
+              paddingHorizontal: 12,
+            }}
+          >
+            <Text style={{ color: theme.text, fontSize: 12.5, fontWeight: '700' }}>
+              <Text style={{ color: theme.danger }}>{overdueCount} overdue</Text> from earlier this week
+            </Text>
+          </View>
+        </View>
+      ) : null}
 
       <FlatList
         data={followups}
         renderItem={renderFollowup}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={{ padding: 16 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        contentContainerStyle={{ padding: 16, paddingBottom: preferences.bottomNavStyle === 'pill' ? 110 : 88 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.accent} />}
         ListEmptyComponent={
-          <View className="items-center justify-center py-12">
-            <Calendar size={48} color="#9ca3af" />
-            <Text className="text-gray-500 mt-4">No follow-ups found</Text>
+          <View style={{ paddingTop: 40 }}>
+            <EmptyState
+              title="No follow-ups here"
+              body="When a lead needs another touchpoint, it will show up in this workspace."
+              theme={theme}
+            />
           </View>
         }
       />

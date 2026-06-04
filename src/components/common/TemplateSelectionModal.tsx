@@ -43,11 +43,37 @@ export function TemplateSelectionModal({
   async function loadTemplates() {
     setLoading(true);
 
-    const { data: profile } = await supabase
-      .from('profiles')
+    const userId = (await supabase.auth.getUser()).data.user?.id;
+
+    if (!userId) {
+      setTemplates([]);
+      setSelectedTemplate(null);
+      setLoading(false);
+      return;
+    }
+
+    const { data: membership, error: membershipError } = await supabase
+      .from('organization_members')
       .select('organization_id')
-      .eq('id', (await supabase.auth.getUser()).data.user?.id)
-      .single();
+      .eq('profile_id', userId)
+      .maybeSingle();
+
+    if (membershipError) {
+      console.error('Error loading template organization:', membershipError);
+      setTemplates([]);
+      setSelectedTemplate(null);
+      setLoading(false);
+      return;
+    }
+
+    const organizationId = membership?.organization_id;
+
+    if (!organizationId) {
+      setTemplates([]);
+      setSelectedTemplate(null);
+      setLoading(false);
+      return;
+    }
 
     const { data, error } = await supabase
       .from('message_templates')
@@ -55,7 +81,7 @@ export function TemplateSelectionModal({
       .eq('template_type', type)
       .eq('is_active', true)
       .eq('is_approved', true)
-      .eq('organization_id', profile?.organization_id)
+      .eq('organization_id', organizationId)
       .order('template_name');
 
     if (error) {

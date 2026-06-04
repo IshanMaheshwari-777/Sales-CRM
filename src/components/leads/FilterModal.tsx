@@ -88,16 +88,21 @@ export function FilterModal({ onClose, onApplyFilters, currentFilters }: FilterM
     setLoading(true);
     const [sourcesRes, usersRes, statusesRes, campaignsRes] = await Promise.all([
       supabase.from('lead_sources').select('*').eq('is_active', true),
-      supabase.from('profiles').select('*').eq('organization_id', profile.organization_id),
+      supabase.from('profiles').select('id, full_name, email').eq('organization_id', profile.organization_id).order('full_name'),
       supabase.from('lead_statuses').select('*').eq('is_active', true).order('order_index'),
-      supabase.from('leads').select('campaign_name').eq('organization_id', profile.organization_id).not('campaign_name', 'is', null),
+      supabase.rpc('get_distinct_campaign_names', {
+        p_organization_id: profile.organization_id,
+        p_limit: 200,
+      }),
     ]);
 
     if (sourcesRes.data) setSources(sourcesRes.data);
     if (usersRes.data) setUsers(usersRes.data);
     if (statusesRes.data) setStatuses(statusesRes.data);
     if (campaignsRes.data) {
-      const unique = Array.from(new Set(campaignsRes.data.map(l => l.campaign_name).filter(Boolean))) as string[];
+      const unique = campaignsRes.data
+        .map((row: any) => row.campaign_name)
+        .filter(Boolean) as string[];
       setCampaignNames(unique);
     }
     setLoading(false);
@@ -155,19 +160,13 @@ export function FilterModal({ onClose, onApplyFilters, currentFilters }: FilterM
   };
 
   const savePreset = async () => {
-    if (!user || !presetName.trim()) return;
-
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('organization_id')
-      .eq('id', user.id)
-      .single();
+    if (!user || !presetName.trim() || !profile?.organization_id) return;
 
     const { error } = await supabase.from('filter_presets').insert({
       user_id: user.id,
       preset_name: presetName,
       filter_criteria: filters,
-      organization_id: profile?.organization_id || null,
+      organization_id: profile.organization_id,
     });
 
     if (!error) {

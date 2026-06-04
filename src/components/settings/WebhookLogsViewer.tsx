@@ -16,7 +16,11 @@ interface WebhookLog {
 
 type LogType = 'all' | 'incoming' | 'outgoing';
 
-export function WebhookLogsViewer() {
+interface WebhookLogsViewerProps {
+  activeOrganizationId: string;
+}
+
+export function WebhookLogsViewer({ activeOrganizationId }: WebhookLogsViewerProps) {
   const [logs, setLogs] = useState<WebhookLog[]>([]);
   const [loading, setLoading] = useState(false);
   const [logType, setLogType] = useState<LogType>('all');
@@ -26,7 +30,7 @@ export function WebhookLogsViewer() {
 
   useEffect(() => {
     fetchLogs();
-  }, [logType, dateFilter]);
+  }, [activeOrganizationId, logType, dateFilter]);
 
   const fetchLogs = async () => {
     setLoading(true);
@@ -38,6 +42,7 @@ export function WebhookLogsViewer() {
         const { data: incomingLogs, error: incomingError } = await supabase
           .from('webhook_request_log')
           .select('*')
+          .eq('organization_id', activeOrganizationId)
           .gte('created_at', daysAgo.toISOString())
           .order('created_at', { ascending: false })
           .limit(100);
@@ -68,6 +73,7 @@ export function WebhookLogsViewer() {
             *,
             integration_endpoints (endpoint_name)
           `)
+          .eq('organization_id', activeOrganizationId)
           .gte('created_at', daysAgo.toISOString())
           .order('created_at', { ascending: false })
           .limit(100);
@@ -92,6 +98,7 @@ export function WebhookLogsViewer() {
           const { data: incomingLogs } = await supabase
             .from('webhook_request_log')
             .select('*')
+            .eq('organization_id', activeOrganizationId)
             .gte('created_at', daysAgo.toISOString())
             .order('created_at', { ascending: false })
             .limit(100);
