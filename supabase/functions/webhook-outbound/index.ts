@@ -49,6 +49,27 @@ async function generateHmacSignature(
   return signature;
 }
 
+function isAllowedUrl(urlString: string): boolean {
+  try {
+    const url = new URL(urlString);
+    const hostname = url.hostname;
+    
+    if (
+      hostname === 'localhost' ||
+      hostname.startsWith('127.') ||
+      hostname.startsWith('10.') ||
+      hostname.startsWith('169.254.') ||
+      /^192\.168\.\d+\.\d+$/.test(hostname) ||
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+$/.test(hostname)
+    ) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function sendWebhook(
   endpoint: IntegrationEndpoint,
   payload: any,
@@ -57,6 +78,9 @@ async function sendWebhook(
   const startTime = Date.now();
 
   try {
+    if (!isAllowedUrl(endpoint.endpoint_url)) {
+      throw new Error('Invalid or restricted endpoint URL');
+    }
     const timestamp = Math.floor(Date.now() / 1000).toString();
     const payloadString = JSON.stringify(payload);
 
@@ -228,6 +252,10 @@ async function sendSlackMessage(
   const startTime = Date.now();
 
   try {
+    if (!isAllowedUrl(endpoint.endpoint_url)) {
+      throw new Error('Invalid or restricted endpoint URL');
+    }
+
     const slackPayload = buildSlackMessage(payload);
 
     const response = await fetch(endpoint.endpoint_url, {
@@ -265,10 +293,6 @@ async function processQueueItem(
   queueItem: QueueItem,
   endpoint: IntegrationEndpoint
 ): Promise<void> {
-  await supabase
-    .from('webhook_delivery_queue')
-    .update({ status: 'processing' })
-    .eq('id', queueItem.id);
 
   let result;
   if (endpoint.endpoint_type === 'slack') {
@@ -352,9 +376,10 @@ Deno.serve(async (req: Request) => {
   try {
     const { data: queueItems, error: queueError } = await supabase
       .from('webhook_delivery_queue')
-      .select('*')
+      .update({ status: 'processing' })
       .eq('status', 'pending')
       .lte('next_retry_at', new Date().toISOString())
+      .select('*')
       .order('created_at', { ascending: true })
       .limit(50);
 

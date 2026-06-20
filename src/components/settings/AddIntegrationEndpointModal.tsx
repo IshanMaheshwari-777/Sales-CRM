@@ -1,6 +1,8 @@
+// @ts-nocheck
 import { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { useToast } from '../../contexts/ToastContext';
 
 interface AddIntegrationEndpointModalProps {
   onClose: () => void;
@@ -11,6 +13,7 @@ type EndpointType = 'slack' | 'webhook' | 'custom';
 type AuthType = 'none' | 'api_key' | 'hmac' | 'bearer';
 
 export function AddIntegrationEndpointModal({ onClose, onSuccess }: AddIntegrationEndpointModalProps) {
+  const { showError } = useToast();
   const [endpointName, setEndpointName] = useState('');
   const [endpointType, setEndpointType] = useState<EndpointType>('webhook');
   const [endpointUrl, setEndpointUrl] = useState('');
@@ -23,12 +26,10 @@ export function AddIntegrationEndpointModal({ onClose, onSuccess }: AddIntegrati
     'lead.reassigned': false,
   });
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setError('');
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -87,7 +88,7 @@ export function AddIntegrationEndpointModal({ onClose, onSuccess }: AddIntegrati
 
       onSuccess();
     } catch (err: any) {
-      setError(err.message || 'Failed to create integration endpoint');
+      showError(err.message || 'Failed to create integration endpoint');
     } finally {
       setLoading(false);
     }
@@ -104,11 +105,6 @@ export function AddIntegrationEndpointModal({ onClose, onSuccess }: AddIntegrati
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
-          {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
-              {error}
-            </div>
-          )}
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">

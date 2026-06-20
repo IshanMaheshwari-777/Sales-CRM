@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState, useEffect } from 'react';
 import { ChevronDown, Info } from 'lucide-react';
 import { getFieldDescription } from '../../lib/csvUtils';

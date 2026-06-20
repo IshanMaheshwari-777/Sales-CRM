@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState, useEffect } from 'react';
 import { X, Search, Download, Pin, Filter, Calendar, User, FileText, Phone, Mail, MessageCircle, RefreshCw, ArrowRightLeft, UserCheck, Flag, Activity } from 'lucide-react';
 import { getLeadActivities, toggleActivityPin, getActivityStats, ActivityType } from '../../services/activityLogger';

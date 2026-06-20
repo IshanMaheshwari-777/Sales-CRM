@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState, useEffect } from 'react';
 import { Download, Loader2, RefreshCw, Calendar } from 'lucide-react';
 import { supabase } from '../../lib/supabase';

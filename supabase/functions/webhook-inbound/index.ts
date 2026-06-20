@@ -199,7 +199,8 @@ async function logWebhookRequest(
 ) {
   const headers: Record<string, string> = {};
   request.headers.forEach((value, key) => {
-    if (!key.toLowerCase().includes('authorization')) {
+    const lowerKey = key.toLowerCase();
+    if (!lowerKey.includes('authorization') && !lowerKey.includes('api-key') && lowerKey !== 'apikey') {
       headers[key] = value;
     }
   });
@@ -277,6 +278,19 @@ Deno.serve(async (req: Request) => {
       const clientIp = req.headers.get('cf-connecting-ip') || req.headers.get('x-forwarded-for');
       if (!clientIp || !webhookConfig.allowed_ip_addresses.includes(clientIp)) {
         throw new Error('IP address not allowed');
+      }
+    }
+
+    if (webhookConfig.rate_limit_per_minute > 0) {
+      const oneMinuteAgo = new Date(Date.now() - 60000).toISOString();
+      const { count: recentRequests, error: countError } = await supabase
+        .from('webhook_request_log')
+        .select('*', { count: 'exact', head: true })
+        .eq('organization_id', organizationId)
+        .gte('created_at', oneMinuteAgo);
+
+      if (!countError && recentRequests !== null && recentRequests >= webhookConfig.rate_limit_per_minute) {
+        throw new Error('Rate limit exceeded');
       }
     }
 
@@ -360,6 +374,7 @@ Deno.serve(async (req: Request) => {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     const status =
       errorMessage === 'Method not allowed' ? 405 :
+      errorMessage.includes('Rate limit exceeded') ? 429 :
       errorMessage.includes('required field') || errorMessage.includes('Invalid JSON payload') ? 400 :
       errorMessage.includes('Missing API key') || errorMessage.includes('Invalid API key') || errorMessage.includes('IP address not allowed') ? 401 :
       500;

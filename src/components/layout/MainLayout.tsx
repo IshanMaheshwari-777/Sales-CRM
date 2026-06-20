@@ -1,4 +1,4 @@
-import { Suspense, lazy, useState } from 'react';
+import { Suspense, lazy, useState, useCallback } from 'react';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { ReminderProvider } from '../../contexts/ReminderContext';
@@ -15,8 +15,8 @@ const WorkflowAutomationPage = lazy(() => import('../../pages/WorkflowAutomation
 
 function SectionLoader() {
   return (
-    <div className="flex h-full min-h-[320px] items-center justify-center p-6 text-slate-500">
-      Loading module...
+    <div className="flex h-full min-h-[320px] items-center justify-center p-6">
+      <div className="h-10 w-10 animate-spin rounded-full border-4 border-orange-500 border-t-transparent" />
     </div>
   );
 }
@@ -37,10 +37,10 @@ export function MainLayout() {
     setActiveSearchQuery('');
   };
 
-  const handleViewFollowup = (followupId: string) => {
+  const handleViewFollowup = useCallback((followupId: string) => {
     setSelectedFollowupId(followupId);
     setActiveSection('followups');
-  };
+  }, []);
 
   const renderContent = () => {
     switch (activeSection) {

@@ -39,30 +39,23 @@ const menuItems: MenuItem[] = [
 export function Sidebar({ activeSection, onSectionChange }: SidebarProps) {
   const { hasPermission, isAdmin, isSuperAdmin, loading } = usePermissions();
 
-  console.log('[Sidebar] Permissions state:', { isAdmin, isSuperAdmin, loading });
-
   const isMenuItemVisible = (item: MenuItem): boolean => {
     if (loading && (item.adminOnly || item.superAdminOnly || item.requiredPermission)) {
-      console.log(`[Sidebar] Hiding ${item.id} while loading`);
       return false;
     }
 
     if (item.superAdminOnly && !isSuperAdmin) {
-      console.log(`[Sidebar] Hiding ${item.id} - superAdminOnly but isSuperAdmin=${isSuperAdmin}`);
       return false;
     }
 
     if (item.adminOnly && !isAdmin) {
-      console.log(`[Sidebar] Hiding ${item.id} - adminOnly but isAdmin=${isAdmin}`);
       return false;
     }
 
     if (item.requiredPermission && !hasPermission(item.requiredPermission)) {
-      console.log(`[Sidebar] Hiding ${item.id} - missing permission ${item.requiredPermission}`);
       return false;
     }
 
-    console.log(`[Sidebar] Showing ${item.id}`);
     return true;
   };
   return (
@@ -80,33 +73,44 @@ export function Sidebar({ activeSection, onSectionChange }: SidebarProps) {
       </div>
 
       <nav className="flex-1 overflow-y-auto py-4">
-        {menuItems.filter(isMenuItemVisible).map((item) => {
-          const Icon = item.icon;
-          const isActive = activeSection === item.id;
+        {loading ? (
+          <div className="space-y-2 px-4">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="flex items-center gap-3 py-3 animate-pulse">
+                <div className="w-5 h-5 bg-slate-200 rounded"></div>
+                <div className="h-4 bg-slate-200 rounded w-32"></div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          menuItems.filter(isMenuItemVisible).map((item) => {
+            const Icon = item.icon;
+            const isActive = activeSection === item.id;
 
-          return (
-            <button
-              key={item.id}
-              onClick={() => onSectionChange(item.id)}
-              data-testid={`nav-${item.id}`}
-              className={`w-full flex items-center gap-3 px-4 py-3 transition-colors ${
-                isActive
-                  ? 'bg-orange-50 border-r-4 border-orange-500 text-orange-600'
-                  : 'text-slate-600 hover:bg-slate-100'
-              }`}
-            >
-              <Icon className="w-5 h-5" />
-              <span className="text-sm font-medium">{item.label}</span>
-            </button>
-          );
-        })}
+            return (
+              <button
+                key={item.id}
+                onClick={() => onSectionChange(item.id)}
+                data-testid={`nav-${item.id}`}
+                className={`w-full flex items-center gap-3 px-4 py-3 transition-colors ${
+                  isActive
+                    ? 'bg-orange-50 border-r-4 border-orange-500 text-orange-600'
+                    : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                <Icon className="w-5 h-5" />
+                <span className="text-sm font-medium">{item.label}</span>
+              </button>
+            );
+          })
+        )}
       </nav>
 
       <div className="p-4 border-t border-slate-200">
-        <button className="w-full flex items-center gap-3 px-4 py-3 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">
+        <a href="mailto:support@extraedge.com" className="w-full flex items-center gap-3 px-4 py-3 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">
           <LifeBuoy className="w-5 h-5" />
           <span className="text-sm font-medium">Raise a Ticket</span>
-        </button>
+        </a>
       </div>
     </div>
   );

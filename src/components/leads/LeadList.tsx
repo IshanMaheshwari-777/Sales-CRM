@@ -15,14 +15,26 @@ interface LeadListProps {
   selectedLeadIds?: Set<string>;
   onSelectChange?: (leadId: string, selected: boolean) => void;
   onEdit?: (leadId: string) => void;
+  isSearching?: boolean;
+  isFiltering?: boolean;
 }
 
-export function LeadList({ leads, onRefresh, selectedLeadIds = new Set(), onSelectChange, onEdit }: LeadListProps) {
+export function LeadList({ leads, onRefresh, selectedLeadIds = new Set(), onSelectChange, onEdit, isSearching, isFiltering }: LeadListProps) {
   if (leads.length === 0) {
+    let title = "No leads found";
+    let sub = "Add your first lead to get started";
+    if (isSearching) {
+      title = "No results found for your search";
+      sub = "Try adjusting your search terms";
+    } else if (isFiltering) {
+      title = "No leads match these filters";
+      sub = "Try adjusting or clearing your filters";
+    }
+
     return (
       <div className="flex flex-col items-center justify-center h-64 text-slate-400">
-        <p className="text-lg font-medium">No leads found</p>
-        <p className="text-sm">Add your first lead to get started</p>
+        <p className="text-lg font-medium text-slate-600">{title}</p>
+        <p className="text-sm mt-1">{sub}</p>
       </div>
     );
   }

@@ -85,7 +85,7 @@ export const validateEmail = (email: string): boolean => {
 
 export const validateLeadRow = (
   row: Record<string, string>,
-  rowNumber: number,
+  _rowNumber: number,
   requiredFields: string[] = ['mobile_number', 'first_name', 'email', 'channel', 'source', 'campaign_name']
 ): { isValid: boolean; errors: ValidationError[] } => {
   const errors: ValidationError[] = [];

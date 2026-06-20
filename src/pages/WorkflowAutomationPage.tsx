@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Bot,
-  ChevronDown,
   Copy,
   Mail,
   Pencil,
@@ -14,6 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useToast } from '../contexts/ToastContext';
 import { usePermissions } from '../contexts/PermissionsContext';
 import {
   CHANNEL_OPTIONS,
@@ -92,6 +92,7 @@ function ActionTypeBadge({ type }: { type: string }) {
 
 export function WorkflowAutomationPage() {
   const { isAdmin, loading: permissionsLoading, userProfile } = usePermissions();
+  const { showError } = useToast();
   const db = supabase as any;
 
   const [workflows, setWorkflows] = useState<WorkflowRecord[]>([]);
@@ -103,7 +104,6 @@ export function WorkflowAutomationPage() {
   const [workflowActions, setWorkflowActions] = useState<Record<string, any[]>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [editingWorkflowId, setEditingWorkflowId] = useState<string | null>(null);
   const [formState, setFormState] = useState<WorkflowFormState>(initialFormState());
@@ -125,7 +125,6 @@ export function WorkflowAutomationPage() {
     if (!userProfile?.organization_id) return;
 
     setLoading(true);
-    setError(null);
 
     try {
       const [workflowRes, profilesRes, statusRes, sourceRes, templateRes] = await Promise.all([
@@ -177,7 +176,7 @@ export function WorkflowAutomationPage() {
       setWorkflowActions(groupedActions);
     } catch (loadError: any) {
       console.error('Error loading workflows:', loadError);
-      setError(loadError.message || 'Failed to load workflows');
+      showError(loadError.message || 'Failed to load workflows');
     } finally {
       setLoading(false);
     }
@@ -186,7 +185,6 @@ export function WorkflowAutomationPage() {
   function resetAndOpenCreate() {
     setEditingWorkflowId(null);
     setFormState(initialFormState());
-    setError(null);
     setShowModal(true);
   }
 
@@ -220,7 +218,6 @@ export function WorkflowAutomationPage() {
       conditions: conditions.length > 0 ? conditions : [emptyCondition()],
       actions: actions.length > 0 ? actions : [emptyAction()],
     });
-    setError(null);
     setShowModal(true);
   }
 
@@ -240,27 +237,30 @@ export function WorkflowAutomationPage() {
   async function saveWorkflow() {
     if (!userProfile?.organization_id) return;
     if (!formState.name.trim()) {
-      setError('Workflow name is required');
+      showError('Workflow name is required');
       return;
     }
-    if (formState.conditions.some((condition) => !condition.fieldKey || (!['is_true', 'is_false'].includes(condition.operator) && !condition.value))) {
-      setError('Please complete all workflow conditions');
+    if (formState.conditions.some((condition) => !condition.fieldKey || (!['is_true', 'is_false'].includes(condition.operator) && !condition.value.trim()))) {
+      showError('Please complete all workflow conditions with valid values');
       return;
     }
     if (formState.actions.length === 0) {
-      setError('At least one action is required');
+      showError('At least one action is required');
+      return;
+    }
+    if (formState.actions.some((action) => action.actionType === 'send_email' && !action.payload.template_id)) {
+      showError('Please select an email template for all send email actions');
       return;
     }
     if (
       formState.category === 'SEND_IMMEDIATE_COMMUNICATION' &&
       (formState.actions.length !== 1 || formState.actions[0].actionType !== 'send_email')
     ) {
-      setError('Immediate communication workflows must contain exactly one email action');
+      showError('Immediate communication workflows must contain exactly one email action');
       return;
     }
 
     setSaving(true);
-    setError(null);
 
     try {
       const startAt = new Date(`${formState.startDate}T${formState.startTime}:00`);
@@ -295,7 +295,7 @@ export function WorkflowAutomationPage() {
         logical_gate: index === 0 ? 'AND' : condition.gate,
         value_json: ['is_true', 'is_false'].includes(condition.operator)
           ? { value: condition.operator === 'is_true' }
-          : { value: condition.value },
+          : { value: condition.value.trim() },
       }));
 
       const actionRows = formState.actions.map((action, index) => ({
@@ -327,7 +327,7 @@ export function WorkflowAutomationPage() {
       await loadAll();
     } catch (saveError: any) {
       console.error('Error saving workflow:', saveError);
-      setError(saveError.message || 'Failed to save workflow');
+      showError(saveError.message || 'Failed to save workflow');
     } finally {
       setSaving(false);
     }
@@ -347,7 +347,7 @@ export function WorkflowAutomationPage() {
       });
       await loadAll();
     } catch (toggleErr: any) {
-      alert(toggleErr.message || 'Failed to update workflow status');
+      showError(toggleErr.message || 'Failed to update workflow status');
     }
   }
 
@@ -365,7 +365,7 @@ export function WorkflowAutomationPage() {
       });
       await loadAll();
     } catch (deleteErr: any) {
-      alert(deleteErr.message || 'Failed to delete workflow');
+      showError(deleteErr.message || 'Failed to delete workflow');
     }
   }
 
@@ -419,7 +419,7 @@ export function WorkflowAutomationPage() {
       });
       await loadAll();
     } catch (duplicateErr: any) {
-      alert(duplicateErr.message || 'Failed to duplicate workflow');
+      showError(duplicateErr.message || 'Failed to duplicate workflow');
     }
   }
 
@@ -663,12 +663,6 @@ export function WorkflowAutomationPage() {
           </button>
         </div>
       </div>
-
-      {error && (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
-        </div>
-      )}
 
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="grid grid-cols-[2fr_1.2fr_1fr_1fr_0.8fr_1.4fr] gap-4 border-b border-slate-200 bg-slate-50 px-6 py-4 text-xs font-semibold uppercase tracking-wide text-slate-500">

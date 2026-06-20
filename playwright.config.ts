@@ -3,6 +3,11 @@ import { defineConfig, devices } from '@playwright/test';
 const baseURL = process.env.PLAYWRIGHT_BASE_URL || 'http://127.0.0.1:4174';
 
 export default defineConfig({
+  webServer: {
+    command: 'npm run preview -- --port 4174',
+    url: 'http://127.0.0.1:4174',
+    reuseExistingServer: !process.env.CI,
+  },
   testDir: './tests/e2e',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,

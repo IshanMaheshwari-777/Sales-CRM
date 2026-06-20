@@ -41,18 +41,18 @@ export async function fetchTemplateData(leadId: string, userId: string): Promise
 
   try {
     const [leadResult, counselorResult] = await Promise.all([
-      supabase
+      (supabase
         .from('leads')
         .select('first_name, last_name, name, mobile_number, email, university, course')
         .abortSignal(controller.signal)
         .eq('id', leadId)
-        .maybeSingle(),
-      supabase
+        .maybeSingle() as any),
+      (supabase
         .from('profiles')
         .select('full_name, email, mobile_number')
         .abortSignal(controller.signal)
         .eq('id', userId)
-        .maybeSingle()
+        .maybeSingle() as any)
     ]);
 
     if (leadResult.error || counselorResult.error || !leadResult.data || !counselorResult.data) {

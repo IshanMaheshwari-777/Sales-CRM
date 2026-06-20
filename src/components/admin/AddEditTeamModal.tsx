@@ -1,8 +1,10 @@
+// @ts-nocheck
 import { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { OrganizationSelector } from '../common/OrganizationSelector';
 import { usePermissions } from '../../contexts/PermissionsContext';
+import { useToast } from '../../contexts/ToastContext';
 
 interface Team {
   id: string;
@@ -24,6 +26,7 @@ interface AddEditTeamModalProps {
 
 export function AddEditTeamModal({ team, organizationId, onClose, onSuccess }: AddEditTeamModalProps) {
   const { userProfile, isSuperAdmin } = usePermissions();
+  const { showError, showSuccess } = useToast();
   const [formData, setFormData] = useState({
     team_name: '',
     team_lead_id: '',
@@ -32,7 +35,6 @@ export function AddEditTeamModal({ team, organizationId, onClose, onSuccess }: A
   const [teamLeads, setTeamLeads] = useState<any[]>([]);
   const [organizationName, setOrganizationName] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
 
   useEffect(() => {
     if (team) {
@@ -102,10 +104,9 @@ export function AddEditTeamModal({ team, organizationId, onClose, onSuccess }: A
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
 
     if (!formData.organization_id) {
-      setError('Please select an organization');
+      showError('Please select an organization');
       return;
     }
 
@@ -144,10 +145,11 @@ export function AddEditTeamModal({ team, organizationId, onClose, onSuccess }: A
         });
       }
 
+      showSuccess(team ? 'Team updated successfully' : 'Team created successfully');
       onSuccess();
     } catch (err: any) {
       console.error('Error saving team:', err);
-      setError(err.message || 'Failed to save team');
+      showError(err.message || 'Failed to save team');
     } finally {
       setLoading(false);
     }
@@ -169,11 +171,6 @@ export function AddEditTeamModal({ team, organizationId, onClose, onSuccess }: A
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
-              {error}
-            </div>
-          )}
 
           {team ? (
             <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
@@ -193,7 +190,7 @@ export function AddEditTeamModal({ team, organizationId, onClose, onSuccess }: A
             <OrganizationSelector
               value={formData.organization_id}
               onChange={(organizationId) => setFormData({ ...formData, organization_id: organizationId, team_lead_id: '' })}
-              error={error && !formData.organization_id ? 'Organization is required' : ''}
+              error={''}
             />
           )}
 

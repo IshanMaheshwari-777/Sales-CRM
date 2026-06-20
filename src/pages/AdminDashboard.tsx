@@ -1,7 +1,7 @@
 import { Suspense, lazy, useMemo, useState } from 'react';
-import { Users, Shield, UsersRound, Mail, GitBranch, Webhook } from 'lucide-react';
-import { usePermissions } from '../contexts/PermissionsContext';
+import { Users, Shield, UsersRound, Mail, GitBranch, Webhook, ShieldAlert } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { usePermissions } from '../contexts/PermissionsContext';
 
 type TabType = 'users' | 'permissions' | 'teams' | 'invitations' | 'assignmentRules' | 'webhooks';
 
@@ -21,11 +21,23 @@ function AdminTabLoader() {
 }
 
 export function AdminDashboard() {
-  const { isSuperAdmin, userProfile } = usePermissions();
   const { profile, organization } = useAuth();
+  const { isAdmin } = usePermissions();
   const [activeTab, setActiveTab] = useState<TabType>('users');
   const organizationId = profile?.organization_id || organization?.id || null;
   const organizationName = organization?.name || 'Unknown Organization';
+
+  if (!isAdmin) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full bg-slate-50 p-6">
+        <ShieldAlert className="w-16 h-16 text-red-500 mb-4" />
+        <h2 className="text-2xl font-bold text-slate-800 mb-2">Access Denied</h2>
+        <p className="text-slate-600 text-center max-w-md">
+          You do not have permission to access the Admin Dashboard. Please contact your system administrator if you believe this is an error.
+        </p>
+      </div>
+    );
+  }
 
   const tabs = [
     { id: 'users' as TabType, label: 'User Management', icon: Users },

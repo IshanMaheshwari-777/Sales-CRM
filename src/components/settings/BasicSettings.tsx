@@ -1,15 +1,22 @@
 import { useState } from 'react';
 import { TemplateManagement } from './TemplateManagement';
+import { WebhookIntegrations } from './WebhookIntegrations';
+import { usePermissions } from '../../contexts/PermissionsContext';
 
-type Tab = 'email' | 'whatsapp';
+type Tab = 'email' | 'whatsapp' | 'webhooks';
 
 export function BasicSettings() {
+  const { isAdmin } = usePermissions();
   const [activeTab, setActiveTab] = useState<Tab>('email');
 
-  const tabs = [
-    { id: 'email' as Tab, label: 'Email Templates' },
-    { id: 'whatsapp' as Tab, label: 'WhatsApp Templates' }
+  const tabs: {id: Tab; label: string}[] = [
+    { id: 'email', label: 'Email Templates' },
+    { id: 'whatsapp', label: 'WhatsApp Templates' }
   ];
+
+  if (isAdmin) {
+    tabs.push({ id: 'webhooks', label: 'Webhooks' });
+  }
 
   return (
     <div className="flex flex-col h-full bg-white">
@@ -41,6 +48,12 @@ export function BasicSettings() {
       {activeTab === 'whatsapp' && (
         <div className="flex-1 overflow-auto px-6 py-6">
           <TemplateManagement templateType="whatsapp" />
+        </div>
+      )}
+
+      {activeTab === 'webhooks' && isAdmin && (
+        <div className="flex-1 overflow-auto px-6 py-6">
+          <WebhookIntegrations />
         </div>
       )}
     </div>

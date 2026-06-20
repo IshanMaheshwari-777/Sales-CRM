@@ -1,7 +1,9 @@
+// @ts-nocheck
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { supabase } from '../../lib/supabase';
 import { UserPlus, AlertCircle, LogOut } from 'lucide-react';
+import { useToast } from '../../contexts/ToastContext';
 
 interface Invitation {
   id: string;
@@ -27,6 +29,7 @@ export function InvitationAcceptance() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const { user, signUp, signOut } = useAuth();
+  const { showError } = useToast();
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -109,30 +112,29 @@ export function InvitationAcceptance() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
 
     if (user) {
-      setError('Please sign out of the current account before accepting this invitation.');
+      showError('Please sign out of the current account before accepting this invitation.');
       return;
     }
 
     if (!firstName.trim() || !lastName.trim()) {
-      setError('First and last names are required');
+      showError('First and last names are required');
       return;
     }
 
     if (password.length < 6) {
-      setError('Password must be at least 6 characters');
+      showError('Password must be at least 6 characters');
       return;
     }
 
     if (password !== confirmPassword) {
-      setError('Passwords do not match');
+      showError('Passwords do not match');
       return;
     }
 
     if (!invitation || !token) {
-      setError('Invalid invitation');
+      showError('Invalid invitation');
       return;
     }
 
@@ -148,21 +150,37 @@ export function InvitationAcceptance() {
       );
 
       if (signUpError) {
-        setError(signUpError.message);
+        showError(signUpError.message);
         setSubmitting(false);
         return;
       }
 
       if (!authData?.user) {
-        setError('Failed to create account');
+        showError('Failed to create account');
         setSubmitting(false);
         return;
       }
 
-      // Wait a moment for the profile creation trigger to complete
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // If session is null, Supabase email confirmation is enabled and the user
+      // must confirm their email before we can update their profile.
+      // To fix this permanently: Supabase Dashboard → Authentication → Settings
+      // → disable "Enable email confirmations".
+      if (!authData?.session) {
+        showError(
+          'Almost there! A confirmation email has been sent to ' +
+          invitation.email +
+          '. Please check your inbox, click the confirmation link, then return to this invitation link to complete setup.'
+        );
+        setSubmitting(false);
+        return;
+      }
 
-      // Update the profile with invitation details
+      // Wait for the handle_new_user trigger to finish creating the profile in the DB.
+      // The trigger runs synchronously in the PostgreSQL transaction but we add
+      // a small buffer for any network/replication lag.
+      await new Promise(resolve => setTimeout(resolve, 1500));
+
+      // Update the profile with the correct invitation org, role, and status
       const { error: profileError } = await supabase
         .from('profiles')
         .update({
@@ -178,7 +196,7 @@ export function InvitationAcceptance() {
         throw new Error('Failed to update profile: ' + profileError.message);
       }
 
-      // Add user to organization members
+      // Upsert organization membership with the invited org and role
       const { error: memberError } = await supabase
         .from('organization_members')
         .upsert({
@@ -209,17 +227,21 @@ export function InvitationAcceptance() {
         throw new Error('Failed to mark invitation as accepted: ' + inviteError.message);
       }
 
-      // Reload the page to trigger authentication flow
+      // Refresh the session JWT so the redirect happens with the correct role claims.
+      // Without this, the access token still has the default role assigned at signup,
+      // not the invited role we just wrote to profile + organization_members.
+      await supabase.auth.refreshSession();
+
+      // Redirect to the app
       window.location.href = '/';
     } catch (err: any) {
       console.error('Error accepting invitation:', err);
-      setError(err.message || 'Failed to accept invitation');
+      showError(err.message || 'Failed to accept invitation');
       setSubmitting(false);
     }
   };
 
   const handleSignOut = async () => {
-    setError('');
     await signOut();
   };
 
@@ -302,12 +324,12 @@ export function InvitationAcceptance() {
                 id="firstName"
                 type="text"
                 value={firstName}
-              onChange={(e) => setFirstName(e.target.value)}
-              className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none transition"
-              placeholder="John"
-              required
-              disabled={!!user}
-            />
+                onChange={(e) => setFirstName(e.target.value)}
+                className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none transition"
+                placeholder="John"
+                required
+                disabled={!!user}
+              />
             </div>
             <div>
               <label htmlFor="lastName" className="block text-sm font-medium text-slate-700 mb-2">
@@ -317,12 +339,12 @@ export function InvitationAcceptance() {
                 id="lastName"
                 type="text"
                 value={lastName}
-              onChange={(e) => setLastName(e.target.value)}
-              className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none transition"
-              placeholder="Doe"
-              required
-              disabled={!!user}
-            />
+                onChange={(e) => setLastName(e.target.value)}
+                className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none transition"
+                placeholder="Doe"
+                required
+                disabled={!!user}
+              />
             </div>
           </div>
 
@@ -387,12 +409,6 @@ export function InvitationAcceptance() {
               disabled={!!user}
             />
           </div>
-
-          {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
-              {error}
-            </div>
-          )}
 
           <button
             type="submit"

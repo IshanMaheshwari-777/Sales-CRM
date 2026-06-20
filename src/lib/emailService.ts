@@ -16,7 +16,7 @@ interface QueueEmailParams {
 export const emailService = {
   async queueEmail(params: QueueEmailParams) {
     try {
-      const { error } = await supabase.from('email_queue').insert({
+      const { error } = await (supabase.from('email_queue') as any).insert({
         to_email: params.to,
         cc_emails: params.cc || [],
         bcc_emails: params.bcc || [],
@@ -46,11 +46,11 @@ export const emailService = {
     roleName: string,
     inviterName: string
   ) {
-    const { data: template } = await supabase
+    const { data: template } = await (supabase
       .from('email_templates')
       .select('*')
       .eq('template_key', 'invitation_sent')
-      .single();
+      .single() as any);
 
     if (!template) {
       console.error('Invitation email template not found');
@@ -81,11 +81,11 @@ export const emailService = {
   },
 
   async sendWelcomeEmail(email: string, organizationName: string, userName: string) {
-    const { data: template } = await supabase
+    const { data: template } = await (supabase
       .from('email_templates')
       .select('*')
       .eq('template_key', 'welcome_email')
-      .single();
+      .single() as any);
 
     if (!template) return { success: false };
 
@@ -109,11 +109,11 @@ export const emailService = {
   },
 
   async sendAccountDisabledEmail(email: string, organizationName: string) {
-    const { data: template } = await supabase
+    const { data: template } = await (supabase
       .from('email_templates')
       .select('*')
       .eq('template_key', 'account_disabled')
-      .single();
+      .single() as any);
 
     if (!template) return { success: false };
 
@@ -132,11 +132,11 @@ export const emailService = {
   },
 
   async sendInviteAcceptedEmail(adminEmail: string, userName: string, organizationName: string) {
-    const { data: template } = await supabase
+    const { data: template } = await (supabase
       .from('email_templates')
       .select('*')
       .eq('template_key', 'invite_accepted')
-      .single();
+      .single() as any);
 
     if (!template) return { success: false };
 

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { LogIn, ArrowLeft, Mail } from 'lucide-react';
+import { useToast } from '../../contexts/ToastContext';
 
 type ViewMode = 'login' | 'signup' | 'forgot-password' | 'reset-sent';
 
@@ -33,20 +34,23 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
-  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const { signIn, signUp, resetPassword } = useAuth();
+  const { showError, showWarning } = useToast();
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
     setLoading(true);
     try {
       const { error } = await signIn(email, password);
-      if (error) setError(getFriendlyError(error.message));
+      if (error) {
+        const msg = getFriendlyError(error.message);
+        isNetworkError(msg) ? showWarning(msg) : showError(msg);
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'An unexpected error occurred';
-      setError(getFriendlyError(msg));
+      const friendlyMsg = getFriendlyError(msg);
+      isNetworkError(friendlyMsg) ? showWarning(friendlyMsg) : showError(friendlyMsg);
     } finally {
       setLoading(false);
     }
@@ -54,18 +58,21 @@ export function LoginPage() {
 
   const handleSignupSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
     if (!firstName.trim() || !lastName.trim()) {
-      setError('First and last names are required');
+      showError('First and last names are required');
       return;
     }
     setLoading(true);
     try {
       const { error } = await signUp(email, password, firstName, lastName);
-      if (error) setError(getFriendlyError(error.message));
+      if (error) {
+        const msg = getFriendlyError(error.message);
+        isNetworkError(msg) ? showWarning(msg) : showError(msg);
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'An unexpected error occurred';
-      setError(getFriendlyError(msg));
+      const friendlyMsg = getFriendlyError(msg);
+      isNetworkError(friendlyMsg) ? showWarning(friendlyMsg) : showError(friendlyMsg);
     } finally {
       setLoading(false);
     }
@@ -73,18 +80,19 @@ export function LoginPage() {
 
   const handleForgotPasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
     setLoading(true);
     try {
       const { error } = await resetPassword(email);
       if (error) {
-        setError(getFriendlyError(error.message));
+        const msg = getFriendlyError(error.message);
+        isNetworkError(msg) ? showWarning(msg) : showError(msg);
       } else {
         setView('reset-sent');
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'An unexpected error occurred';
-      setError(getFriendlyError(msg));
+      const friendlyMsg = getFriendlyError(msg);
+      isNetworkError(friendlyMsg) ? showWarning(friendlyMsg) : showError(friendlyMsg);
     } finally {
       setLoading(false);
     }
@@ -92,7 +100,6 @@ export function LoginPage() {
 
   const switchView = (newView: ViewMode) => {
     setView(newView);
-    setError('');
   };
 
   if (view === 'reset-sent') {
@@ -165,12 +172,6 @@ export function LoginPage() {
                 autoFocus
               />
             </div>
-
-            {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
-                {error}
-              </div>
-            )}
 
             <button
               type="submit"
@@ -282,17 +283,6 @@ export function LoginPage() {
               minLength={6}
             />
           </div>
-
-          {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm space-y-2">
-              <p>{error}</p>
-              {isNetworkError(error) && (
-                <p className="text-xs text-red-600">
-                  Try disabling browser extensions (ad blockers, VPNs) or open in an incognito window and try again.
-                </p>
-              )}
-            </div>
-          )}
 
           <button
             type="submit"

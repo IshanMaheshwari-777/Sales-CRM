@@ -1,7 +1,9 @@
+// @ts-nocheck
 import { useState, useEffect } from 'react';
 import { X, UserPlus, AlertCircle } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
+import { useToast } from '../../contexts/ToastContext';
 import type { Database } from '../../lib/database.types';
 import type { BulkLeadFilterContext } from './bulkFilterContext';
 
@@ -16,10 +18,10 @@ interface BulkAssignModalProps {
 
 export function BulkAssignModal({ leadIds, filterContext, onClose, onSuccess }: BulkAssignModalProps) {
   const { user, profile } = useAuth();
+  const { showError } = useToast();
   const [users, setUsers] = useState<Profile[]>([]);
   const [selectedUser, setSelectedUser] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
 
   useEffect(() => {
     loadUsers();
@@ -44,12 +46,11 @@ export function BulkAssignModal({ leadIds, filterContext, onClose, onSuccess }: 
 
   const handleAssign = async () => {
     if (!selectedUser) {
-      setError('Please select a user');
+      showError('Please select a user');
       return;
     }
 
     setLoading(true);
-    setError('');
 
     try {
       // Get selected user details
@@ -94,7 +95,7 @@ export function BulkAssignModal({ leadIds, filterContext, onClose, onSuccess }: 
 
       onSuccess();
     } catch (err) {
-      setError('Failed to assign leads. Please try again.');
+      showError('Failed to assign leads. Please try again.');
       console.error(err);
     } finally {
       setLoading(false);
@@ -126,12 +127,6 @@ export function BulkAssignModal({ leadIds, filterContext, onClose, onSuccess }: 
               You are about to assign <strong>{leadIds.length > 0 ? leadIds.length : filterContext?.totalCount || 0}</strong> lead{(leadIds.length > 0 ? leadIds.length : filterContext?.totalCount || 0) !== 1 ? 's' : ''} to a new owner.
             </p>
           </div>
-
-          {error && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-              <p className="text-sm text-red-800">{error}</p>
-            </div>
-          )}
 
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-2">

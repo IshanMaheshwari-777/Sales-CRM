@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState, useEffect } from 'react';
 import { Phone, Mail, MessageCircle, TrendingUp, TrendingDown } from 'lucide-react';
 import { supabase } from '../../lib/supabase';

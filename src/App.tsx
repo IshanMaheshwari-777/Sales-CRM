@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { AuthProvider } from './contexts/AuthContext';
 import { PermissionsProvider } from './contexts/PermissionsContext';
+import { ToastProvider } from './contexts/ToastContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { MainLayout } from './components/layout/MainLayout';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
@@ -20,13 +21,15 @@ function App() {
 
   return (
     <ErrorBoundary>
-      <AuthProvider>
-        <PermissionsProvider>
-          <ProtectedRoute>
-            <MainLayout />
-          </ProtectedRoute>
-        </PermissionsProvider>
-      </AuthProvider>
+      <ToastProvider>
+        <AuthProvider>
+          <PermissionsProvider>
+            <ProtectedRoute>
+              <MainLayout />
+            </ProtectedRoute>
+          </PermissionsProvider>
+        </AuthProvider>
+      </ToastProvider>
     </ErrorBoundary>
   );
 }

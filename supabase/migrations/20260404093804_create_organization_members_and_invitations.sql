@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS invitations (
   email text NOT NULL,
   role_id uuid NOT NULL REFERENCES roles(id) ON DELETE RESTRICT,
   invited_by uuid NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
-  token text UNIQUE NOT NULL DEFAULT encode(gen_random_bytes(32), 'hex'),
+  token text UNIQUE NOT NULL DEFAULT encode(extensions.gen_random_bytes(32), 'hex'),
   status invitation_status NOT NULL DEFAULT 'pending',
   expires_at timestamptz NOT NULL DEFAULT (now() + interval '7 days'),
   accepted_at timestamptz,
