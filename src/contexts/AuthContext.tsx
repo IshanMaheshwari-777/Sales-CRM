@@ -43,7 +43,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
       if (session?.user) {
-        loadProfile(session.user.id);
+        if (_event === 'INITIAL_SESSION' || _event === 'SIGNED_IN' || _event === 'PASSWORD_RECOVERY') {
+          loadProfile(session.user.id);
+        }
       } else {
         setProfile(null);
         setOrganization(null);
