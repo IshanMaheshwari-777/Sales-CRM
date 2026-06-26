@@ -1,3 +1,3 @@
 export function buildInvitationLink(invitationToken: string) {
-  return `https://sales-crm-24th.vercel.app/?token=${encodeURIComponent(invitationToken)}`;
+  return `https://sales-crm-lilac.vercel.app/?token=${encodeURIComponent(invitationToken)}`;
 }
